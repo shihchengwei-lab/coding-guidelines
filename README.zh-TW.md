@@ -2,22 +2,38 @@
 
 > [English](./README.md) | 中文
 
-把四條 coding rules + 一條例外，透過 Claude Code 的 UserPromptSubmit hook 注入每次對話。模型每次處理你的 prompt 前，會先看到這些內容。
+Claude Code 兩階段 hook：每次 prompt 前注入正面規則（UserPromptSubmit），agent 要停下時注入自查清單（Stop）。
 
-不靠 LLM 自己讀 CLAUDE.md。不建 enforcement framework。只是把規則貼進每次 context。
+不靠 LLM 自己讀 CLAUDE.md。不建 enforcement framework。只是把規則貼進真正派得上用場的時機。
 
-## 四條規則 + Trivial 例外
+## 注入什麼
+
+**每次 prompt 前**（`rules.sh` / `rules.py`）：
 
 ```
 1. 寫 code 前先講假設
-2. 不寫不必要的 code
-3. 不改目標以外的行
-4. 先寫測試，再寫到通過
+2. 先寫測試，再寫到通過
 
-例外：Trivial 任務只套用第 2、3 條。
+例外：Trivial 任務跳過這兩條。
 ```
 
-要換成你自己的規則，編輯 `rules.sh`（或 `rules.py`）。
+**Agent 要停下時**（`review.sh` / `review.py`）：
+
+```
+[簡潔] senior engineer 看 diff 會不會說太複雜？
+- 有沒有為單次使用的 code 寫抽象？
+- 有沒有加沒被要求的彈性／配置？
+- 有沒有處理不可能發生的錯誤？
+
+[範圍] 每一行改動能不能 trace 回去本輪 user 最初的請求？
+- 有沒有順手改鄰近 code／註解／格式？
+- 有沒有 refactor 沒壞的東西？
+- 有沒有刪掉早就存在的 dead code（只該提及，不該刪）？
+
+任一項符合，修掉再停。
+```
+
+要換成你自己的內容，直接編輯腳本。
 
 ---
 
@@ -30,30 +46,30 @@
 
 本 repo 提供：
 
-- `rules.sh` / `rules.en.sh` — POSIX shell script（中文版 / 英文版，Linux / macOS / WSL / Git Bash 用）
-- `rules.py` / `rules.en.py` — Python alternative（中文版 / 英文版，Windows native 推薦）
-- `settings.example.json` — 範例配置（`UserPromptSubmit` event，Linux/macOS 路徑風格；指向中文版 `rules.sh`；Windows 看下面第 2 節最後的替換）
+- `rules.sh` / `rules.en.sh`、`review.sh` / `review.en.sh` — POSIX shell script（中文版 / 英文版，Linux / macOS / WSL / Git Bash 用）
+- `rules.py` / `rules.en.py`、`review.py` / `review.en.py` — Python alternative（中文版 / 英文版，Windows native 推薦）
+- `settings.example.json` — 範例配置（UserPromptSubmit + Stop，Linux/macOS 路徑風格；指向中文版腳本；Windows 看下面第 2 節最後的替換）
 
-### 1. 放 script 到固定位置
+### 1. 放 scripts 到固定位置
 
 Linux / macOS / WSL / Git Bash：
 
 ```bash
 mkdir -p ~/.claude/scripts
-cp rules.sh ~/.claude/scripts/
-chmod +x ~/.claude/scripts/rules.sh
+cp rules.sh review.sh ~/.claude/scripts/
+chmod +x ~/.claude/scripts/rules.sh ~/.claude/scripts/review.sh
 ```
 
 Windows（PowerShell）：
 
 ```powershell
 New-Item -ItemType Directory -Force -Path $HOME\.claude\scripts
-Copy-Item rules.py $HOME\.claude\scripts\
+Copy-Item rules.py, review.py $HOME\.claude\scripts\
 ```
 
-### 2. 配置 Claude Code hook
+### 2. 配置 Claude Code hooks
 
-把 `settings.example.json` 的 hook 條目合併進 `~/.claude/settings.json`。如果你已經有 `UserPromptSubmit` 陣列，把新的 hook block append 進陣列尾端；如果沒有，整個 `UserPromptSubmit` 區塊照貼即可。
+把 `settings.example.json` 的 hook 條目合併進 `~/.claude/settings.json`。對每個 event（`UserPromptSubmit`、`Stop`）：如果已經有對應陣列，把新 hook block append 進尾端；沒有就整個 block 照貼。
 
 ```json
 {
@@ -68,15 +84,27 @@ Copy-Item rules.py $HOME\.claude\scripts\
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/scripts/review.sh",
+            "timeout": 5
+          }
+        ]
+      }
     ]
   }
 }
 ```
 
-Windows native 把 `command` 改成（把 `YOUR_NAME` 換成你的 Windows 使用者名稱）：
+Windows native 把每個 `command` 改成（把 `YOUR_NAME` 換成你的 Windows 使用者名稱）：
 
 ```json
 "command": "python C:/Users/YOUR_NAME/.claude/scripts/rules.py"
+"command": "python C:/Users/YOUR_NAME/.claude/scripts/review.py"
 ```
 
 注意：Windows native 的 hook 不一定能展開 `~`，所以這裡用絕對路徑。
@@ -93,15 +121,17 @@ Agent 應該先問或先列假設（CSV 編碼？欄位名稱？過濾條件怎�
 
 > 不要用「寫個排序函數」這類請求驗證——按規則的 Trivial 例外，agent 對這類請求本來就不需要列假設，會分不出是 hook 沒生效還是規則正確套用。
 
+Agent 收尾時，應該也會看到它在停下前自查（Stop hook 注入簡潔／範圍清單）。如果從來沒看到自查，Stop hook 可能沒生效。
+
 ---
 
 ## 自訂
 
-規則寫在 `rules.sh` / `rules.py`（以及 `.en` 變體）內。直接編輯字串就行。
+內容寫在 `rules.sh` / `rules.py` 跟 `review.sh` / `review.py`（以及 `.en` 變體）內。直接編輯字串就行。
 
 > Windows 使用者注意：`rules.py` 開頭兩行 `import sys; sys.stdout.reconfigure(encoding="utf-8")` 是給 Windows native Python 用的——預設 stdout 用系統編碼（如 cp950），中文會輸出成亂碼。改寫時保留這兩行。Linux/macOS 不需要。`rules.en.py` 純 ASCII 沒這兩行；若你把它改寫成含中日韓等非 ASCII，記得加上。
 
-四條規則是 Karpathy 的通用最小集合，例外是規則沒有明講的邊界。你可以：
+原本的四條規則都還在——只是按階段拆開。pre-prompt hook 把兩條正面規則保持短（每輪高 attention）；pre-stop hook 把兩條負面規則（「不寫不必要的 code」「不改 scope 外的 code」）各展開成 3 條具體自查，因為抽象的禁止句太容易在 turn 開頭被宣告 compliance 後就忘掉。例外是 pre-prompt 規則沒有明講的邊界。你可以：
 
 - 換成領域特定規則（前端、資料工程、研究 code、特定 stack）
 - 換成團隊規範
@@ -121,24 +151,20 @@ Agent 應該先問或先列假設（CSV 編碼？欄位名稱？過濾條件怎�
 
 ---
 
-## 為什麼這四條 + 例外
+## 為什麼分兩階段
 
-四條規則來自 Andrej Karpathy 對 LLM coding pitfalls 的觀察——對應常見失控形態：
+四條規則全部來自 Andrej Karpathy 對 LLM coding pitfalls 的觀察。階段拆分對應每條規則實際發生作用的時機：
 
-- 第 1 條防：跳過確認、假設藏在 code 裡、單方面挑解讀
-- 第 2 條防：過度設計、加沒被要求的 feature、抽象先行
-- 第 3 條防：順手 refactor、改 formatting、動 scope 外的 code
-- 第 4 條防：先寫實作再補測試（goodharting）
+- **Pre-prompt**（正面句，開始寫之前）：先講假設、先寫測試。塑造 *agent 怎麼起步*。維持 2 條讓每輪都短、attention 高。
+- **Pre-stop**（禁止句，結束之前）：自查過度設計跟越界改動。這兩類在寫的過程中很容易犯、又很容易在 turn 開頭講完就忘。各展開成 3 條 checklist，因為一句抽象的禁止句（「不寫不必要的 code」）太容易被點頭應付過去——具體的問題（「有沒有為單次 code 寫抽象？」）比較難 evade。
 
-第 1、4 條是正面句（該做什麼），第 2、3 條是禁止句（不做什麼）——對應每條規則本質的方向性。
-
-例外是規則沒有明講的邊界。原版放在 preamble（"For trivial tasks, use judgment"），本 repo 改寫為「例外：Trivial 任務只套用第 2、3 條。」——hook 每輪重複需要更穩定的 default。
+例外只套用在 pre-prompt：trivial 任務要求列假設跟測試是 overhead。pre-stop 清單一律跑——過度設計跟越界改動跟任務大小無關。
 
 ---
 
 ## Credits
 
-四條規則整理自 [multica-ai/andrej-karpathy-skills](https://github.com/multica-ai/andrej-karpathy-skills) — derived from Andrej Karpathy's observations on LLM coding pitfalls。例外改寫自原版 CLAUDE.md preamble 的 "For trivial tasks, use judgment"。
+規則整理自 [multica-ai/andrej-karpathy-skills](https://github.com/multica-ai/andrej-karpathy-skills) — derived from Andrej Karpathy's observations on LLM coding pitfalls。例外改寫自原版 CLAUDE.md preamble 的 "For trivial tasks, use judgment"。
 
 ## License
 

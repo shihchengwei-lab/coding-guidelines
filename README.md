@@ -2,22 +2,38 @@
 
 > English | [中文](./README.zh-TW.md)
 
-Inject four coding rules plus one exception into every Claude Code conversation via the UserPromptSubmit hook. The model sees these rules before processing each of your prompts.
+Two-stage hook for Claude Code: positive rules injected before each prompt (UserPromptSubmit), a self-review checklist injected when the agent tries to stop (Stop).
 
-No reliance on the LLM reading CLAUDE.md. No enforcement framework. Just rules pasted into every turn's context.
+No reliance on the LLM reading CLAUDE.md. No enforcement framework. Just rules pasted into context at the moments they matter.
 
-## The Four Rules + Trivial Exception
+## What gets injected
+
+**Before each prompt** (`rules.en.sh` / `rules.en.py`):
 
 ```
 1. State assumptions before writing code
-2. Don't write unnecessary code
-3. Don't modify lines outside the target
-4. Write tests first, then write code to pass them
+2. Write tests first, then write code to pass them
 
-Exception: Trivial tasks only apply rules 2 and 3.
+Exception: Trivial tasks skip both rules.
 ```
 
-To use your own rules, edit `rules.en.sh` (or `rules.en.py`).
+**Before the agent stops** (`review.en.sh` / `review.en.py`):
+
+```
+[Simplicity] Would a senior engineer call this diff too complex?
+- Any abstractions written for one-shot code?
+- Any unrequested flexibility/configuration?
+- Any handling of errors that can't actually happen?
+
+[Scope] Can every changed line be traced back to the user's original request this turn?
+- Any drive-by edits to nearby code / comments / formatting?
+- Any refactor of things that weren't broken?
+- Any deletion of pre-existing dead code (mention only, don't delete)?
+
+If any apply, fix it before stopping.
+```
+
+To customize, edit the scripts.
 
 ---
 
@@ -30,30 +46,30 @@ See the official Claude Code hook docs:
 
 This repo provides:
 
-- `rules.sh` / `rules.en.sh` — POSIX shell script (Chinese / English, for Linux / macOS / WSL / Git Bash)
-- `rules.py` / `rules.en.py` — Python alternative (Chinese / English, recommended for Windows native)
-- `settings.example.json` — example configuration (`UserPromptSubmit` event, Linux/macOS path style; points to the Chinese `rules.sh` by default — English users: substitute `rules.en.sh`)
+- `rules.sh` / `rules.en.sh`, `review.sh` / `review.en.sh` — POSIX shell scripts (Chinese / English, for Linux / macOS / WSL / Git Bash)
+- `rules.py` / `rules.en.py`, `review.py` / `review.en.py` — Python alternatives (Chinese / English, recommended for Windows native)
+- `settings.example.json` — example configuration (UserPromptSubmit + Stop, Linux/macOS path style; points to the Chinese scripts by default — English users: substitute the `.en` variants)
 
-### 1. Place the script in a fixed location
+### 1. Place the scripts in a fixed location
 
 Linux / macOS / WSL / Git Bash:
 
 ```bash
 mkdir -p ~/.claude/scripts
-cp rules.en.sh ~/.claude/scripts/
-chmod +x ~/.claude/scripts/rules.en.sh
+cp rules.en.sh review.en.sh ~/.claude/scripts/
+chmod +x ~/.claude/scripts/rules.en.sh ~/.claude/scripts/review.en.sh
 ```
 
 Windows (PowerShell):
 
 ```powershell
 New-Item -ItemType Directory -Force -Path $HOME\.claude\scripts
-Copy-Item rules.en.py $HOME\.claude\scripts\
+Copy-Item rules.en.py, review.en.py $HOME\.claude\scripts\
 ```
 
-### 2. Configure the Claude Code hook
+### 2. Configure the Claude Code hooks
 
-Merge the hook entry from `settings.example.json` into `~/.claude/settings.json`. If you already have a `UserPromptSubmit` array, append the new hook block to its end; otherwise paste the entire `UserPromptSubmit` block as-is.
+Merge the hook entries from `settings.example.json` into `~/.claude/settings.json`. For each event (`UserPromptSubmit`, `Stop`): if you already have that array, append the new hook block to its end; otherwise paste the whole block as-is.
 
 ```json
 {
@@ -68,15 +84,27 @@ Merge the hook entry from `settings.example.json` into `~/.claude/settings.json`
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/scripts/review.en.sh",
+            "timeout": 5
+          }
+        ]
+      }
     ]
   }
 }
 ```
 
-Windows native: change `command` to (replace `YOUR_NAME` with your Windows username):
+Windows native: change each `command` to (replace `YOUR_NAME` with your Windows username):
 
 ```json
 "command": "python C:/Users/YOUR_NAME/.claude/scripts/rules.en.py"
+"command": "python C:/Users/YOUR_NAME/.claude/scripts/review.en.py"
 ```
 
 Note: Windows native hooks don't always expand `~`, so use an absolute path here.
@@ -93,15 +121,17 @@ The agent should ask or state assumptions first (CSV encoding? column names? how
 
 > Don't verify with a request like "write a sort function" — under the Trivial Exception, the agent doesn't need to state assumptions for such requests anyway, so you can't tell whether the hook failed or the rule was correctly applied.
 
+When the agent finishes a turn, you should also see it self-check before stopping (the Stop hook injects the simplicity/scope checklist). If no self-check ever appears, the Stop hook may not be active.
+
 ---
 
 ## Customization
 
-Rules live in `rules.sh` / `rules.py` (and their `.en` variants). Just edit the strings.
+Rules live in `rules.sh` / `rules.py` and `review.sh` / `review.py` (and their `.en` variants). Just edit the strings.
 
 > Non-ASCII users: if you rewrite the rules to contain CJK or other non-ASCII characters, look at `rules.py` — the two lines `import sys; sys.stdout.reconfigure(encoding="utf-8")` at the top are required for Windows native Python (the default stdout uses the system codepage, e.g. cp950, which mangles non-ASCII output). Add them to your script. Bash on Linux/macOS doesn't need this. `rules.en.py` is pure ASCII and omits those lines.
 
-The four rules are Karpathy's general minimal set; the exception covers the boundary the rules don't explicitly address. You can:
+All four original rules are still present — split by stage. The pre-prompt hook keeps the two positive rules short (high attention every turn). The pre-stop hook takes the two negative rules ("don't write unnecessary code", "don't touch scope outside the target") and expands each into a 3-item self-check, because abstract negatives are too easy to declare compliance with at the top of a turn. The exception covers the boundary the pre-prompt rules don't explicitly address. You can:
 
 - Swap in domain-specific rules (frontend, data engineering, research code, a particular stack)
 - Swap in team conventions
@@ -121,24 +151,20 @@ There's no single right version. The sweet spot depends on your session length d
 
 ---
 
-## Why These Four + the Exception
+## Why two stages
 
-The four rules come from Andrej Karpathy's observations on LLM coding pitfalls — they target common failure modes:
+All four rules come from Andrej Karpathy's observations on LLM coding pitfalls. The split mirrors when each rule actually fires:
 
-- Rule 1 prevents: skipping confirmation, hiding assumptions in code, picking interpretations unilaterally
-- Rule 2 prevents: over-engineering, adding unrequested features, premature abstraction
-- Rule 3 prevents: drive-by refactors, formatting changes, modifying out-of-scope code
-- Rule 4 prevents: writing implementation first and backfilling tests (goodharting)
+- **Pre-prompt** (positive, before writing): state assumptions, write tests first. These shape *how the agent starts*. Kept to 2 rules to stay short and high-attention every turn.
+- **Pre-stop** (negative, before finishing): self-check for over-engineering and out-of-scope changes. These are easy to violate while writing and easy to skip if stated only at the top of a turn. Expanded into 3-item checklists each, because a single abstract negative ("don't write unnecessary code") is too easy to nod through — concrete questions ("any abstractions for one-shot code?") are harder to evade.
 
-Rules 1 and 4 are positive (what to do); rules 2 and 3 are negative (what not to do) — matching each rule's intrinsic direction.
-
-The exception covers what the rules don't explicitly address. The original places it in a preamble ("For trivial tasks, use judgment"); this repo rewords it as "Exception: Trivial tasks only apply rules 2 and 3." — for a hook that repeats every turn, a more stable default is needed.
+The exception only applies to the pre-prompt rules: for trivial tasks, asking for assumptions and tests is overhead. The pre-stop checklist always runs — over-engineering and scope creep are concerns regardless of task size.
 
 ---
 
 ## Credits
 
-The four rules are distilled from [multica-ai/andrej-karpathy-skills](https://github.com/multica-ai/andrej-karpathy-skills) — derived from Andrej Karpathy's observations on LLM coding pitfalls. The exception is reworded from the original CLAUDE.md preamble's "For trivial tasks, use judgment."
+The rules are distilled from [multica-ai/andrej-karpathy-skills](https://github.com/multica-ai/andrej-karpathy-skills) — derived from Andrej Karpathy's observations on LLM coding pitfalls. The exception is reworded from the original CLAUDE.md preamble's "For trivial tasks, use judgment."
 
 ## License
 

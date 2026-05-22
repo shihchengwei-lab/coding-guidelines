@@ -10,6 +10,17 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/scripts/review.sh",
+            "timeout": 5
+          }
+        ]
+      }
     ]
   }
 }
