@@ -2,9 +2,9 @@
 
 > [English](./README.md) | 中文
 
-Claude Code 兩階段 hook：每次 prompt 前注入正面規則（UserPromptSubmit），agent 要停下時注入自查清單（Stop）。
+Claude Code 兩階段 hook：每次 prompt 前注入正面規則（UserPromptSubmit），agent 要停下時注入自查清單（Stop）。Stop hook 用 `exit 2` 強迫 agent 把清單讀進視線，再走一輪才能真的停下。
 
-不靠 LLM 自己讀 CLAUDE.md。不建 enforcement framework。只是把規則貼進真正派得上用場的時機。
+不靠 LLM 自己讀 CLAUDE.md。不建外部 framework——只是把文字餵進 Claude Code 內建 hook。
 
 ## 注入什麼
 
@@ -131,7 +131,7 @@ Agent 收尾時，應該也會看到它在停下前自查（Stop hook 注入簡�
 
 > Windows 使用者注意：`rules.py` 開頭兩行 `import sys; sys.stdout.reconfigure(encoding="utf-8")` 是給 Windows native Python 用的——預設 stdout 用系統編碼（如 cp950），中文會輸出成亂碼。改寫時保留這兩行。Linux/macOS 不需要。`rules.en.py` 純 ASCII 沒這兩行；若你把它改寫成含中日韓等非 ASCII，記得加上。
 
-原本的四條規則都還在——只是按階段拆開。pre-prompt hook 把兩條正面規則保持短（每輪高 attention）；pre-stop hook 把兩條負面規則（「不寫不必要的 code」「不改 scope 外的 code」）各展開成 3 條具體自查，因為抽象的禁止句太容易在 turn 開頭被宣告 compliance 後就忘掉。例外是 pre-prompt 規則沒有明講的邊界。你可以：
+規則分兩類。正面句（「做 X 之前先做 Y」）放在 pre-prompt hook，維持短讓每輪高 attention。禁止句（「不寫不必要的 code」「不改 scope 外的 code」）放在 pre-stop hook，寫成具體自查項，因為抽象的禁止句太容易在 turn 開頭被點頭應付過去——具體的問題（「有沒有為單次 code 寫抽象？」）比較難 evade。例外是 pre-prompt 規則沒有明講的邊界。你可以：
 
 - 換成領域特定規則（前端、資料工程、研究 code、特定 stack）
 - 換成團隊規範
@@ -153,10 +153,10 @@ Agent 收尾時，應該也會看到它在停下前自查（Stop hook 注入簡�
 
 ## 為什麼分兩階段
 
-四條規則全部來自 Andrej Karpathy 對 LLM coding pitfalls 的觀察。階段拆分對應每條規則實際發生作用的時機：
+規則來自 Andrej Karpathy 對 LLM coding pitfalls 的觀察。它們按發生作用的時機自然分兩階段：
 
-- **Pre-prompt**（正面句，開始寫之前）：先講假設、先寫測試。塑造 *agent 怎麼起步*。維持 2 條讓每輪都短、attention 高。
-- **Pre-stop**（禁止句，結束之前）：自查過度設計跟越界改動。這兩類在寫的過程中很容易犯、又很容易在 turn 開頭講完就忘。各展開成 3 條 checklist，因為一句抽象的禁止句（「不寫不必要的 code」）太容易被點頭應付過去——具體的問題（「有沒有為單次 code 寫抽象？」）比較難 evade。
+- **Pre-prompt**（正面句，開始寫之前）：先講假設、先寫測試。塑造 *agent 怎麼起步*——短規則讓每輪都高 attention。
+- **Pre-stop**（禁止句，結束之前）：自查過度設計跟越界改動。這類在寫的過程中很容易犯、又很容易在 turn 開頭被一句抽象的禁止句點頭應付過去。具體問題（「有沒有為單次 code 寫抽象？」）比「不寫不必要的 code」難 evade。
 
 例外只套用在 pre-prompt：trivial 任務要求列假設跟測試是 overhead。pre-stop 清單一律跑——過度設計跟越界改動跟任務大小無關。
 

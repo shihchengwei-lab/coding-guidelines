@@ -2,9 +2,9 @@
 
 > English | [中文](./README.zh-TW.md)
 
-Two-stage hook for Claude Code: positive rules injected before each prompt (UserPromptSubmit), a self-review checklist injected when the agent tries to stop (Stop).
+Two-stage hook for Claude Code: positive rules injected before each prompt (UserPromptSubmit), a self-review checklist injected when the agent tries to stop (Stop). The Stop hook uses `exit 2` so the checklist is forced into the agent's view, and the agent takes one more pass before actually stopping.
 
-No reliance on the LLM reading CLAUDE.md. No enforcement framework. Just rules pasted into context at the moments they matter.
+No reliance on the LLM reading CLAUDE.md. No external framework — just text fed into Claude Code's built-in hooks.
 
 ## What gets injected
 
@@ -131,7 +131,7 @@ Rules live in `rules.sh` / `rules.py` and `review.sh` / `review.py` (and their `
 
 > Non-ASCII users: if you rewrite the rules to contain CJK or other non-ASCII characters, look at `rules.py` — the two lines `import sys; sys.stdout.reconfigure(encoding="utf-8")` at the top are required for Windows native Python (the default stdout uses the system codepage, e.g. cp950, which mangles non-ASCII output). Add them to your script. Bash on Linux/macOS doesn't need this. `rules.en.py` is pure ASCII and omits those lines.
 
-All four original rules are still present — split by stage. The pre-prompt hook keeps the two positive rules short (high attention every turn). The pre-stop hook takes the two negative rules ("don't write unnecessary code", "don't touch scope outside the target") and expands each into a 3-item self-check, because abstract negatives are too easy to declare compliance with at the top of a turn. The exception covers the boundary the pre-prompt rules don't explicitly address. You can:
+The rules come in two flavors. Positive ones ("do X before writing") go in the pre-prompt hook, short for high attention every turn. Negative ones ("don't write unnecessary code", "don't touch scope outside the target") go in the pre-stop hook as concrete self-check items, because abstract negatives are too easy to nod through at the top of a turn — concrete questions ("any abstractions for one-shot code?") are harder to evade. The exception covers the boundary the pre-prompt rules don't explicitly address. You can:
 
 - Swap in domain-specific rules (frontend, data engineering, research code, a particular stack)
 - Swap in team conventions
@@ -153,10 +153,10 @@ There's no single right version. The sweet spot depends on your session length d
 
 ## Why two stages
 
-All four rules come from Andrej Karpathy's observations on LLM coding pitfalls. The split mirrors when each rule actually fires:
+The rules are drawn from Andrej Karpathy's observations on LLM coding pitfalls. They split naturally by when they fire:
 
-- **Pre-prompt** (positive, before writing): state assumptions, write tests first. These shape *how the agent starts*. Kept to 2 rules to stay short and high-attention every turn.
-- **Pre-stop** (negative, before finishing): self-check for over-engineering and out-of-scope changes. These are easy to violate while writing and easy to skip if stated only at the top of a turn. Expanded into 3-item checklists each, because a single abstract negative ("don't write unnecessary code") is too easy to nod through — concrete questions ("any abstractions for one-shot code?") are harder to evade.
+- **Pre-prompt** (positive, before writing): state assumptions, write tests first. These shape *how the agent starts* — short rules stay high-attention every turn.
+- **Pre-stop** (negative, before finishing): self-check for over-engineering and out-of-scope changes. These are easy to violate mid-stream and easy to skip if stated only as a single abstract negative at the start. Concrete questions ("any abstractions for one-shot code?") are harder to evade than "don't write unnecessary code."
 
 The exception only applies to the pre-prompt rules: for trivial tasks, asking for assumptions and tests is overhead. The pre-stop checklist always runs — over-engineering and scope creep are concerns regardless of task size.
 

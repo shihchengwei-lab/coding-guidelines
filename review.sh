@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 payload=$(cat)
-case "$payload" in
-  *'"stop_hook_active":true'*) exit 0 ;;
-esac
+if echo "$payload" | grep -Eq '"stop_hook_active"[[:space:]]*:[[:space:]]*true'; then
+  exit 0
+fi
 
 cat >&2 <<'INNER'
 [簡潔] senior engineer 看 diff 會不會說太複雜？

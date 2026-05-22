@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 payload=$(cat)
-case "$payload" in
-  *'"stop_hook_active":true'*) exit 0 ;;
-esac
+if echo "$payload" | grep -Eq '"stop_hook_active"[[:space:]]*:[[:space:]]*true'; then
+  exit 0
+fi
 
 cat >&2 <<'INNER'
 [Simplicity] Would a senior engineer call this diff too complex?
