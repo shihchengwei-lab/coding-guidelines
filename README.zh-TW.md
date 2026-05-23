@@ -158,7 +158,7 @@ Agent 收尾時，應該也會看到它在停下前自查（Stop hook 注入簡�
 - **Pre-prompt**（正面句，開始寫之前）：先講假設、先寫測試。塑造 *agent 怎麼起步*——短規則讓每輪都高 attention。
 - **Pre-stop**（禁止句，結束之前）：自查過度設計跟越界改動。這類在寫的過程中很容易犯、又很容易在 turn 開頭被一句抽象的禁止句點頭應付過去。具體問題（「有沒有為單次 code 寫抽象？」）比「不寫不必要的 code」難 evade。
 
-例外只套用在 pre-prompt：trivial 任務要求列假設跟測試是 overhead。pre-stop 清單一律跑——過度設計跟越界改動跟任務大小無關。
+例外只套用在 pre-prompt：trivial 任務要求列假設跟測試是 overhead。pre-stop 清單在 agent 想停時跑——Python 版會跳過本輪沒用 Edit／Write／NotebookEdit 的情況（純對話輪不會有噪音）；shell 版每次停都跑。
 
 ---
 

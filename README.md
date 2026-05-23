@@ -158,7 +158,7 @@ The rules are drawn from Andrej Karpathy's observations on LLM coding pitfalls. 
 - **Pre-prompt** (positive, before writing): state assumptions, write tests first. These shape *how the agent starts* — short rules stay high-attention every turn.
 - **Pre-stop** (negative, before finishing): self-check for over-engineering and out-of-scope changes. These are easy to violate mid-stream and easy to skip if stated only as a single abstract negative at the start. Concrete questions ("any abstractions for one-shot code?") are harder to evade than "don't write unnecessary code."
 
-The exception only applies to the pre-prompt rules: for trivial tasks, asking for assumptions and tests is overhead. The pre-stop checklist always runs — over-engineering and scope creep are concerns regardless of task size.
+The exception only applies to the pre-prompt rules: for trivial tasks, asking for assumptions and tests is overhead. The pre-stop checklist runs whenever the agent tries to stop — but the Python scripts skip turns that didn't use Edit / Write / NotebookEdit (so pure-conversation turns stay quiet); the shell scripts still fire on every stop.
 
 ---
 
