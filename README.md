@@ -33,6 +33,20 @@ Exception: Trivial tasks skip both rules.
 If any apply, fix it before stopping.
 ```
 
+The Python scripts (`review.en.py` / `review.py`) add two behaviors the shell scripts don't have:
+
+1. **Doc-only filtering** — if every edit in the turn targets documentation files (`.md`, `.txt`, `.json`, `.yml`, `.yaml`, `.toml`) or paths inside `.claude/`, the checklist is skipped entirely. This avoids false triggers when editing READMEs, config, or hook settings.
+
+2. **Verification check** — when code was edited but no test or verification command was run afterward, a third section is appended:
+
+```
+[Verification] Code was edited this turn but no test or verification command was run.
+- Run relevant tests to confirm nothing is broken.
+- If no test coverage exists, say so explicitly.
+```
+
+Read-only commands (`ls`, `cat`, `git status`, `git diff`, `git log`, etc.) don't count as verification — the agent must have actually run something (tests, build, lint, a script) to clear this check.
+
 To customize, edit the scripts.
 
 ---
@@ -158,7 +172,7 @@ The rules are drawn from Andrej Karpathy's observations on LLM coding pitfalls. 
 - **Pre-prompt** (positive, before writing): state assumptions, write tests first. These shape *how the agent starts* — short rules stay high-attention every turn.
 - **Pre-stop** (negative, before finishing): self-check for over-engineering and out-of-scope changes. These are easy to violate mid-stream and easy to skip if stated only as a single abstract negative at the start. Concrete questions ("any abstractions for one-shot code?") are harder to evade than "don't write unnecessary code."
 
-The exception only applies to the pre-prompt rules: for trivial tasks, asking for assumptions and tests is overhead. The pre-stop checklist runs whenever the agent tries to stop — but the Python scripts skip turns that didn't use Edit / Write / NotebookEdit (so pure-conversation turns stay quiet); the shell scripts still fire on every stop.
+The exception only applies to the pre-prompt rules: for trivial tasks, asking for assumptions and tests is overhead. The pre-stop checklist runs whenever the agent tries to stop — but the Python scripts skip turns that didn't edit code (pure-conversation turns and doc-only turns stay quiet); the shell scripts still fire on every stop. The Python scripts also check whether the agent ran any verification command after the last code edit, and inject an extra `[Verification]` reminder if not.
 
 ---
 

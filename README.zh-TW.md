@@ -30,8 +30,22 @@ Claude Code 兩階段 hook：每次 prompt 前注入正面規則（UserPromptSub
 - 有沒有 refactor 沒壞的東西？
 - 有沒有刪掉早就存在的 dead code（只該提及，不該刪）？
 
-任一項符合，修掉再停。
+任一項符合，修掉。
 ```
+
+Python 版（`review.py` / `review.en.py`）比 shell 版多兩個行為：
+
+1. **文件過濾** — 如果這一輪所有編輯都是文件檔（`.md`、`.txt`、`.json`、`.yml`、`.yaml`、`.toml`）或 `.claude/` 底下的路徑，直接跳過 checklist。改 README、設定檔、hook 腳本時不再觸發。
+
+2. **驗證檢查** — 改了 code 但之後沒跑測試或驗證指令時，多加一段：
+
+```
+[驗證] 改了 code 但這一輪沒跑測試或驗證指令。
+- 跑相關測試，確認改動沒壞東西。
+- 沒有測試覆蓋的部分明說「這段沒測」。
+```
+
+唯讀指令（`ls`、`cat`、`git status`、`git diff`、`git log` 等）不算驗證——agent 必須實際跑過測試、build、lint 或腳本才能清除這條。
 
 要換成你自己的內容，直接編輯腳本。
 
@@ -158,7 +172,7 @@ Agent 收尾時，應該也會看到它在停下前自查（Stop hook 注入簡�
 - **Pre-prompt**（正面句，開始寫之前）：先講假設、先寫測試。塑造 *agent 怎麼起步*——短規則讓每輪都高 attention。
 - **Pre-stop**（禁止句，結束之前）：自查過度設計跟越界改動。這類在寫的過程中很容易犯、又很容易在 turn 開頭被一句抽象的禁止句點頭應付過去。具體問題（「有沒有為單次 code 寫抽象？」）比「不寫不必要的 code」難 evade。
 
-例外只套用在 pre-prompt：trivial 任務要求列假設跟測試是 overhead。pre-stop 清單在 agent 想停時跑——Python 版會跳過本輪沒用 Edit／Write／NotebookEdit 的情況（純對話輪不會有噪音）；shell 版每次停都跑。
+例外只套用在 pre-prompt：trivial 任務要求列假設跟測試是 overhead。pre-stop 清單在 agent 想停時跑——Python 版會跳過沒改 code 的輪次（純對話跟只改文件都不會有噪音）；shell 版每次停都跑。Python 版還會檢查 agent 改完 code 之後有沒有跑驗證指令，沒有的話多加一段 `[驗證]` 提醒。
 
 ---
 
