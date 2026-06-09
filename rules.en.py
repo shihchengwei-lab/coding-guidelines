@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 print("""**Coding guidelines for this session:**
 
-1. State assumptions before writing code
+1. Break the task down to its most fundamental requirements before writing code, then state assumptions
 2. Write tests first, then write code to pass them
 
 Exception: Trivial tasks skip both rules.""")

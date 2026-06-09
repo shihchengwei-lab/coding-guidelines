@@ -11,7 +11,7 @@ No reliance on the LLM reading CLAUDE.md. No external framework — just text fe
 **Before each prompt** (`rules.en.sh` / `rules.en.py`):
 
 ```
-1. State assumptions before writing code
+1. Break the task down to its most fundamental requirements before writing code, then state assumptions
 2. Write tests first, then write code to pass them
 
 Exception: Trivial tasks skip both rules.
