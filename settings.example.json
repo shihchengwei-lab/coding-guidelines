@@ -9,6 +9,15 @@
             "timeout": 5
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/scripts/inventory_gate.sh",
+            "timeout": 5
+          }
+        ]
       }
     ],
     "Stop": [

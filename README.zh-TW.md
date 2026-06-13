@@ -2,7 +2,7 @@
 
 > [English](./README.md) | 中文
 
-Claude Code 兩階段 hook：每次 prompt 前注入正面規則（UserPromptSubmit），agent 要停下時注入自查清單（Stop）。Stop hook 用 `exit 2` 強迫 agent 把清單讀進視線，再走一輪才能真的停下。
+Claude Code 兩階段 hook。**每次 prompt 前**（UserPromptSubmit）：always-on 的正面規則，外加一個只在「要建新東西」時才觸發的 keyword-gated 提醒。**agent 要停下時**（Stop）：自查清單。Stop hook 用 `exit 2` 強迫 agent 把清單讀進視線，再走一輪才能真的停下。
 
 不靠 LLM 自己讀 CLAUDE.md。不建外部 framework——只是把文字餵進 Claude Code 內建 hook。
 
@@ -16,6 +16,22 @@ Claude Code 兩階段 hook：每次 prompt 前注入正面規則（UserPromptSub
 
 例外：Trivial 任務跳過這兩條。
 ```
+
+**每次 prompt 前，但只在「要建新東西」時**（`inventory_gate.sh` / `inventory_gate.py`）：
+
+```
+🧰 建新東西偵測 — 動手前先盤點（多數「我需要新 X」其實是「我沒找到已有的 X」）：
+
+1. ls/glob 相關目錄，看有沒有同名／同功能的東西
+2. grep 關鍵詞，看這個功能是不是已經有人實作過
+3. 問：能不能「擴既有的」而不是「建新的」？
+   能擴 → 擴它（少一份要維護的東西）
+   真的沒有 → 再建，並說明為什麼既有的不夠用
+
+「先盤點再決定建不建」是減法紀律的第一道關。
+```
+
+跟 always-on 的規則不同，這條是 keyword-gated：只在 prompt 命中「建新東西」的字眼（`建一個`、`新增`、`create a`、`build a` 等）時才觸發，不在每輪都加重量。Python 版精準取 `prompt` 欄位；shell 版用 grep 掃整個 payload（不靠 `jq`）。
 
 **Agent 要停下時**（`review.sh` / `review.py`）：
 
@@ -60,8 +76,8 @@ Python 版（`review.py` / `review.en.py`）比 shell 版多兩個行為：
 
 本 repo 提供：
 
-- `rules.sh` / `rules.en.sh`、`review.sh` / `review.en.sh` — POSIX shell script（中文版 / 英文版，Linux / macOS / WSL / Git Bash 用）
-- `rules.py` / `rules.en.py`、`review.py` / `review.en.py` — Python alternative（中文版 / 英文版，Windows native 推薦）
+- `rules.sh` / `rules.en.sh`、`inventory_gate.sh` / `inventory_gate.en.sh`、`review.sh` / `review.en.sh` — POSIX shell script（中文版 / 英文版，Linux / macOS / WSL / Git Bash 用）
+- `rules.py` / `rules.en.py`、`inventory_gate.py` / `inventory_gate.en.py`、`review.py` / `review.en.py` — Python alternative（中文版 / 英文版，Windows native 推薦）
 - `settings.example.json` — 範例配置（UserPromptSubmit + Stop，Linux/macOS 路徑風格；指向中文版腳本；Windows 看下面第 2 節最後的替換）
 
 ### 1. 放 scripts 到固定位置
@@ -70,15 +86,15 @@ Linux / macOS / WSL / Git Bash：
 
 ```bash
 mkdir -p ~/.claude/scripts
-cp rules.sh review.sh ~/.claude/scripts/
-chmod +x ~/.claude/scripts/rules.sh ~/.claude/scripts/review.sh
+cp rules.sh inventory_gate.sh review.sh ~/.claude/scripts/
+chmod +x ~/.claude/scripts/rules.sh ~/.claude/scripts/inventory_gate.sh ~/.claude/scripts/review.sh
 ```
 
 Windows（PowerShell）：
 
 ```powershell
 New-Item -ItemType Directory -Force -Path $HOME\.claude\scripts
-Copy-Item rules.py, review.py $HOME\.claude\scripts\
+Copy-Item rules.py, inventory_gate.py, review.py $HOME\.claude\scripts\
 ```
 
 ### 2. 配置 Claude Code hooks
@@ -94,6 +110,15 @@ Copy-Item rules.py, review.py $HOME\.claude\scripts\
           {
             "type": "command",
             "command": "~/.claude/scripts/rules.sh",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/scripts/inventory_gate.sh",
             "timeout": 5
           }
         ]
@@ -118,6 +143,7 @@ Windows native 把每個 `command` 改成（把 `YOUR_NAME` 換成你的 Windows
 
 ```json
 "command": "python C:/Users/YOUR_NAME/.claude/scripts/rules.py"
+"command": "python C:/Users/YOUR_NAME/.claude/scripts/inventory_gate.py"
 "command": "python C:/Users/YOUR_NAME/.claude/scripts/review.py"
 ```
 
@@ -133,6 +159,8 @@ Windows native 把每個 `command` 改成（把 `YOUR_NAME` 換成你的 Windows
 
 Agent 應該先問或先列假設（CSV 編碼？欄位名稱？過濾條件怎麼指定？輸出要不要 pretty print？）再動手，而不是直接寫 code。如果 agent 直接動手沒講假設，hook 可能沒生效——檢查 script 路徑、權限、settings.json 語法。
 
+因為這個例子有「做一個」的字眼，盤點關卡也會觸發：你應該看到 agent 先快速 `ls`／`grep` 確認有沒有現成的類似工具，而不是沒問就從零開始造。
+
 > 不要用「寫個排序函數」這類請求驗證——按規則的 Trivial 例外，agent 對這類請求本來就不需要列假設，會分不出是 hook 沒生效還是規則正確套用。
 
 Agent 收尾時，應該也會看到它在停下前自查（Stop hook 注入簡潔／範圍清單）。如果從來沒看到自查，Stop hook 可能沒生效。
@@ -141,7 +169,7 @@ Agent 收尾時，應該也會看到它在停下前自查（Stop hook 注入簡�
 
 ## 自訂
 
-內容寫在 `rules.sh` / `rules.py` 跟 `review.sh` / `review.py`（以及 `.en` 變體）內。直接編輯字串就行。
+內容寫在 `rules.sh` / `rules.py` 跟 `review.sh` / `review.py`（以及 `.en` 變體）內。直接編輯字串就行。盤點關卡（`inventory_gate.sh` / `inventory_gate.py`）另有一份 `TRIGGER` 觸發詞清單，可加寬或收窄來控制它何時觸發。
 
 > Windows 使用者注意：`rules.py` 開頭兩行 `import sys; sys.stdout.reconfigure(encoding="utf-8")` 是給 Windows native Python 用的——預設 stdout 用系統編碼（如 cp950），中文會輸出成亂碼。改寫時保留這兩行。Linux/macOS 不需要。`rules.en.py` 純 ASCII 沒這兩行；若你把它改寫成含中日韓等非 ASCII，記得加上。
 
@@ -169,7 +197,7 @@ Agent 收尾時，應該也會看到它在停下前自查（Stop hook 注入簡�
 
 規則來自 Andrej Karpathy 對 LLM coding pitfalls 的觀察。它們按發生作用的時機自然分兩階段：
 
-- **Pre-prompt**（正面句，開始寫之前）：先講假設、先寫測試。塑造 *agent 怎麼起步*——短規則讓每輪都高 attention。
+- **Pre-prompt**（正面句，開始寫之前）：先講假設、先寫測試。塑造 *agent 怎麼起步*——短規則讓每輪都高 attention。第二個 pre-prompt hook——盤點關卡——不是 always-on 而是 keyword-gated：只在要建新東西時才觸發，提醒先檢查有沒有現成資產再造輪子；刻意保持條件式，才不會稀釋 always-on 的短規則。
 - **Pre-stop**（禁止句，結束之前）：自查過度設計跟越界改動。這類在寫的過程中很容易犯、又很容易在 turn 開頭被一句抽象的禁止句點頭應付過去。具體問題（「有沒有為單次 code 寫抽象？」）比「不寫不必要的 code」難 evade。
 
 例外只套用在 pre-prompt：trivial 任務要求列假設跟測試是 overhead。pre-stop 清單在 agent 想停時跑——Python 版會跳過沒改 code 的輪次（純對話跟只改文件都不會有噪音）；shell 版每次停都跑。Python 版還會檢查 agent 改完 code 之後有沒有跑驗證指令，沒有的話多加一段 `[驗證]` 提醒。

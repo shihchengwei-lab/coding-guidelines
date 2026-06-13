@@ -2,7 +2,7 @@
 
 > English | [中文](./README.zh-TW.md)
 
-Two-stage hook for Claude Code: positive rules injected before each prompt (UserPromptSubmit), a self-review checklist injected when the agent tries to stop (Stop). The Stop hook uses `exit 2` so the checklist is forced into the agent's view, and the agent takes one more pass before actually stopping.
+Two-stage hook for Claude Code. **Before each prompt** (UserPromptSubmit): always-on positive rules, plus a keyword-gated reminder that fires only when you're about to build something new. **When the agent tries to stop** (Stop): a self-review checklist. The Stop hook uses `exit 2` so the checklist is forced into the agent's view, and the agent takes one more pass before actually stopping.
 
 No reliance on the LLM reading CLAUDE.md. No external framework — just text fed into Claude Code's built-in hooks.
 
@@ -16,6 +16,22 @@ No reliance on the LLM reading CLAUDE.md. No external framework — just text fe
 
 Exception: Trivial tasks skip both rules.
 ```
+
+**Before each prompt, but only when you're about to build something new** (`inventory_gate.en.sh` / `inventory_gate.en.py`):
+
+```
+[Inventory] "Build something new" detected -- inventory before you build (most "I need a new X" is really "I didn't find the existing X"):
+
+1. ls/glob the relevant dirs for something with the same name/function
+2. grep the keywords to see if it is already implemented
+3. Ask: can I extend what exists instead of building new?
+   Can extend -> extend it (one less thing to maintain)
+   Genuinely absent -> then build, and note why the existing one was not enough
+
+"Inventory first, then decide whether to build" is the first gate of subtraction discipline.
+```
+
+Unlike the always-on rules, this one is keyword-gated: it fires only when the prompt matches "build something new" phrasing (`create a`, `build a`, `implement a`, ...), so it adds no weight to turns that aren't about building. The Python version reads the `prompt` field precisely; the shell version greps the whole payload (no `jq` dependency).
 
 **Before the agent stops** (`review.en.sh` / `review.en.py`):
 
@@ -60,8 +76,8 @@ See the official Claude Code hook docs:
 
 This repo provides:
 
-- `rules.sh` / `rules.en.sh`, `review.sh` / `review.en.sh` — POSIX shell scripts (Chinese / English, for Linux / macOS / WSL / Git Bash)
-- `rules.py` / `rules.en.py`, `review.py` / `review.en.py` — Python alternatives (Chinese / English, recommended for Windows native)
+- `rules.sh` / `rules.en.sh`, `inventory_gate.sh` / `inventory_gate.en.sh`, `review.sh` / `review.en.sh` — POSIX shell scripts (Chinese / English, for Linux / macOS / WSL / Git Bash)
+- `rules.py` / `rules.en.py`, `inventory_gate.py` / `inventory_gate.en.py`, `review.py` / `review.en.py` — Python alternatives (Chinese / English, recommended for Windows native)
 - `settings.example.json` — example configuration (UserPromptSubmit + Stop, Linux/macOS path style; points to the Chinese scripts by default — English users: substitute the `.en` variants)
 
 ### 1. Place the scripts in a fixed location
@@ -70,15 +86,15 @@ Linux / macOS / WSL / Git Bash:
 
 ```bash
 mkdir -p ~/.claude/scripts
-cp rules.en.sh review.en.sh ~/.claude/scripts/
-chmod +x ~/.claude/scripts/rules.en.sh ~/.claude/scripts/review.en.sh
+cp rules.en.sh inventory_gate.en.sh review.en.sh ~/.claude/scripts/
+chmod +x ~/.claude/scripts/rules.en.sh ~/.claude/scripts/inventory_gate.en.sh ~/.claude/scripts/review.en.sh
 ```
 
 Windows (PowerShell):
 
 ```powershell
 New-Item -ItemType Directory -Force -Path $HOME\.claude\scripts
-Copy-Item rules.en.py, review.en.py $HOME\.claude\scripts\
+Copy-Item rules.en.py, inventory_gate.en.py, review.en.py $HOME\.claude\scripts\
 ```
 
 ### 2. Configure the Claude Code hooks
@@ -94,6 +110,15 @@ Merge the hook entries from `settings.example.json` into `~/.claude/settings.jso
           {
             "type": "command",
             "command": "~/.claude/scripts/rules.en.sh",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/scripts/inventory_gate.en.sh",
             "timeout": 5
           }
         ]
@@ -118,6 +143,7 @@ Windows native: change each `command` to (replace `YOUR_NAME` with your Windows 
 
 ```json
 "command": "python C:/Users/YOUR_NAME/.claude/scripts/rules.en.py"
+"command": "python C:/Users/YOUR_NAME/.claude/scripts/inventory_gate.en.py"
 "command": "python C:/Users/YOUR_NAME/.claude/scripts/review.en.py"
 ```
 
@@ -133,6 +159,8 @@ Open a new session and try a clearly **non-trivial** request, e.g.:
 
 The agent should ask or state assumptions first (CSV encoding? column names? how filter conditions are specified? pretty-print output?) before writing code, rather than diving straight in. If the agent jumps to code without stating assumptions, the hook may not be active — check the script path, permissions, and `settings.json` syntax.
 
+Because that example says "build a", the inventory gate also fires: you should see the agent check whether a similar tool already exists (a quick `ls`/`grep`) before writing a new one, rather than building from scratch unprompted.
+
 > Don't verify with a request like "write a sort function" — under the Trivial Exception, the agent doesn't need to state assumptions for such requests anyway, so you can't tell whether the hook failed or the rule was correctly applied.
 
 When the agent finishes a turn, you should also see it self-check before stopping (the Stop hook injects the simplicity/scope checklist). If no self-check ever appears, the Stop hook may not be active.
@@ -141,7 +169,7 @@ When the agent finishes a turn, you should also see it self-check before stoppin
 
 ## Customization
 
-Rules live in `rules.sh` / `rules.py` and `review.sh` / `review.py` (and their `.en` variants). Just edit the strings.
+Rules live in `rules.sh` / `rules.py` and `review.sh` / `review.py` (and their `.en` variants). Just edit the strings. The inventory gate (`inventory_gate.sh` / `inventory_gate.py`) also has a `TRIGGER` keyword list you can widen or narrow to control when it fires.
 
 > Non-ASCII users: if you rewrite the rules to contain CJK or other non-ASCII characters, look at `rules.py` — the two lines `import sys; sys.stdout.reconfigure(encoding="utf-8")` at the top are required for Windows native Python (the default stdout uses the system codepage, e.g. cp950, which mangles non-ASCII output). Add them to your script. Bash on Linux/macOS doesn't need this. `rules.en.py` is pure ASCII and omits those lines.
 
@@ -169,7 +197,7 @@ There's no single right version. The sweet spot depends on your session length d
 
 The rules are drawn from Andrej Karpathy's observations on LLM coding pitfalls. They split naturally by when they fire:
 
-- **Pre-prompt** (positive, before writing): state assumptions, write tests first. These shape *how the agent starts* — short rules stay high-attention every turn.
+- **Pre-prompt** (positive, before writing): state assumptions, write tests first. These shape *how the agent starts* — short rules stay high-attention every turn. A second pre-prompt hook, the inventory gate, is keyword-gated rather than always-on: it fires only when you're about to build something new, nudging a check for existing assets before reinventing — kept conditional so it doesn't dilute the short always-on rules.
 - **Pre-stop** (negative, before finishing): self-check for over-engineering and out-of-scope changes. These are easy to violate mid-stream and easy to skip if stated only as a single abstract negative at the start. Concrete questions ("any abstractions for one-shot code?") are harder to evade than "don't write unnecessary code."
 
 The exception only applies to the pre-prompt rules: for trivial tasks, asking for assumptions and tests is overhead. The pre-stop checklist runs whenever the agent tries to stop — but the Python scripts skip turns that didn't edit code (pure-conversation turns and doc-only turns stay quiet); the shell scripts still fire on every stop. The Python scripts also check whether the agent ran any verification command after the last code edit, and inject an extra `[Verification]` reminder if not.
