@@ -20,15 +20,15 @@ Exception: Trivial tasks skip both rules.
 **Before each prompt, but only when you're about to build something new** (`inventory_gate.en.sh` / `inventory_gate.en.py`):
 
 ```
-[Inventory] "Build something new" detected -- inventory before you build (most "I need a new X" is really "I didn't find the existing X"):
+[Inventory] "Build something new" detected -- inventory outward-in before you build; most "I need a new X" already exists in one of the first 4 layers:
 
-1. ls/glob the relevant dirs for something with the same name/function
-2. grep the keywords to see if it is already implemented
-3. Ask: can I extend what exists instead of building new?
-   Can extend -> extend it (one less thing to maintain)
-   Genuinely absent -> then build, and note why the existing one was not enough
+1. Does this even need doing? -- is the task itself redundant? Can the goal be met by "not doing it" or "doing something else"?
+2. Built into the language/platform? -- stdlib, shell builtin, OS, or the framework itself may already provide it.
+3. Already-installed dependency? -- check package.json / requirements.txt / Cargo.toml / go.mod; don't rewrite what's already a dep.
+4. Already in this repo? -- ls/glob the relevant dirs and grep the keywords to see if it's already implemented.
+5. None of layers 1-4 cover it -> then build, and note why each prior layer was not enough.
 
-"Inventory first, then decide whether to build" is the first gate of subtraction discipline.
+Can extend what exists -> extend it (one less thing to maintain). "Inventory first, then decide whether to build" is the first gate of subtraction discipline.
 ```
 
 Unlike the always-on rules, this one is keyword-gated: it fires only when the prompt matches "build something new" phrasing (`create a`, `build a`, `implement a`, ...), so it adds no weight to turns that aren't about building. The Python version reads the `prompt` field precisely; the shell version greps the whole payload (no `jq` dependency).
