@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "~/.claude/scripts/rules.sh",
+            "command": "python3 ~/.claude/scripts/rules.py",
             "timeout": 5
           }
         ]
@@ -14,7 +14,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "~/.claude/scripts/inventory_gate.sh",
+            "command": "python3 ~/.claude/scripts/inventory_gate.py",
             "timeout": 5
           }
         ]
@@ -25,7 +25,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "~/.claude/scripts/review.sh",
+            "command": "python3 ~/.claude/scripts/review.py",
             "timeout": 5
           }
         ]

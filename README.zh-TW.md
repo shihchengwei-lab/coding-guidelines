@@ -8,7 +8,7 @@ Claude Code 兩階段 hook。**每次 prompt 前**（UserPromptSubmit）：alway
 
 ## 注入什麼
 
-**每次 prompt 前**（`rules.sh` / `rules.py`）：
+**每次 prompt 前**（`rules.py`）：
 
 ```
 1. 寫 code 前先把任務拆解成最基本的需求，再講出假設
@@ -17,7 +17,7 @@ Claude Code 兩階段 hook。**每次 prompt 前**（UserPromptSubmit）：alway
 例外：Trivial 任務跳過這兩條。
 ```
 
-**每次 prompt 前，但只在「要建新東西」時**（`inventory_gate.sh` / `inventory_gate.py`）：
+**每次 prompt 前，但只在「要建新東西」時**（`inventory_gate.py`）：
 
 ```
 🧰 建新東西偵測 — 動手前由外往內盤點，多數「我需要新 X」前面 4 層其實已經有了：
@@ -31,9 +31,9 @@ Claude Code 兩階段 hook。**每次 prompt 前**（UserPromptSubmit）：alway
 能擴既有的 → 擴它（少一份要維護的東西）。「先盤點再決定建不建」是減法紀律的第一道關。
 ```
 
-跟 always-on 的規則不同，這條是 keyword-gated：只在 prompt 命中「建新東西」的字眼（`建一個`、`新增`、`create a`、`build a` 等）時才觸發，不在每輪都加重量。Python 版精準取 `prompt` 欄位；shell 版用 grep 掃整個 payload（不靠 `jq`）。
+跟 always-on 的規則不同，這條是 keyword-gated：只在 prompt 命中「建新東西」的字眼（`建一個`、`新增`、`create a`、`build a` 等）時才觸發，不在每輪都加重量。
 
-**Agent 要停下時**（`review.sh` / `review.py`）：
+**Agent 要停下時**（`review.py`）：
 
 ```
 [簡潔] senior engineer 看 diff 會不會說太複雜？
@@ -49,7 +49,7 @@ Claude Code 兩階段 hook。**每次 prompt 前**（UserPromptSubmit）：alway
 任一項符合，修掉。
 ```
 
-Python 版（`review.py` / `review.en.py`）比 shell 版多兩個行為：
+Review 腳本除了印 checklist 之外，還做兩件事：
 
 1. **文件過濾** — 如果這一輪所有編輯都是文件檔（`.md`、`.txt`、`.json`、`.yml`、`.yaml`、`.toml`）或 `.claude/` 底下的路徑，直接跳過 checklist。改 README、設定檔、hook 腳本時不再觸發。
 
@@ -76,18 +76,16 @@ Python 版（`review.py` / `review.en.py`）比 shell 版多兩個行為：
 
 本 repo 提供：
 
-- `rules.sh` / `rules.en.sh`、`inventory_gate.sh` / `inventory_gate.en.sh`、`review.sh` / `review.en.sh` — POSIX shell script（中文版 / 英文版，Linux / macOS / WSL / Git Bash 用）
-- `rules.py` / `rules.en.py`、`inventory_gate.py` / `inventory_gate.en.py`、`review.py` / `review.en.py` — Python alternative（中文版 / 英文版，Windows native 推薦）
+- `rules.py` / `rules.en.py`、`inventory_gate.py` / `inventory_gate.en.py`、`review.py` / `review.en.py` — Python 腳本（中文版 / 英文版）。需要 Python 3（現代版本都可以）。
 - `settings.example.json` — 範例配置（UserPromptSubmit + Stop，Linux/macOS 路徑風格；指向中文版腳本；Windows 看下面第 2 節最後的替換）
 
 ### 1. 放 scripts 到固定位置
 
-Linux / macOS / WSL / Git Bash：
+Linux / macOS / WSL：
 
 ```bash
 mkdir -p ~/.claude/scripts
-cp rules.sh inventory_gate.sh review.sh ~/.claude/scripts/
-chmod +x ~/.claude/scripts/rules.sh ~/.claude/scripts/inventory_gate.sh ~/.claude/scripts/review.sh
+cp rules.py inventory_gate.py review.py ~/.claude/scripts/
 ```
 
 Windows（PowerShell）：
@@ -101,6 +99,8 @@ Copy-Item rules.py, inventory_gate.py, review.py $HOME\.claude\scripts\
 
 把 `settings.example.json` 的 hook 條目合併進 `~/.claude/settings.json`。對每個 event（`UserPromptSubmit`、`Stop`）：如果已經有對應陣列，把新 hook block append 進尾端；沒有就整個 block 照貼。
 
+Linux / macOS / WSL — `python3` 跟 `~` 路徑展開都可用：
+
 ```json
 {
   "hooks": {
@@ -109,7 +109,7 @@ Copy-Item rules.py, inventory_gate.py, review.py $HOME\.claude\scripts\
         "hooks": [
           {
             "type": "command",
-            "command": "~/.claude/scripts/rules.sh",
+            "command": "python3 ~/.claude/scripts/rules.py",
             "timeout": 5
           }
         ]
@@ -118,7 +118,7 @@ Copy-Item rules.py, inventory_gate.py, review.py $HOME\.claude\scripts\
         "hooks": [
           {
             "type": "command",
-            "command": "~/.claude/scripts/inventory_gate.sh",
+            "command": "python3 ~/.claude/scripts/inventory_gate.py",
             "timeout": 5
           }
         ]
@@ -129,7 +129,7 @@ Copy-Item rules.py, inventory_gate.py, review.py $HOME\.claude\scripts\
         "hooks": [
           {
             "type": "command",
-            "command": "~/.claude/scripts/review.sh",
+            "command": "python3 ~/.claude/scripts/review.py",
             "timeout": 5
           }
         ]
@@ -139,15 +139,13 @@ Copy-Item rules.py, inventory_gate.py, review.py $HOME\.claude\scripts\
 }
 ```
 
-Windows native 把每個 `command` 改成（把 `YOUR_NAME` 換成你的 Windows 使用者名稱）：
+Windows native — 用 `python` 加絕對路徑（Windows 的 hook 不一定能展開 `~`；把 `YOUR_NAME` 換成你的 Windows 使用者名稱）：
 
 ```json
 "command": "python C:/Users/YOUR_NAME/.claude/scripts/rules.py"
 "command": "python C:/Users/YOUR_NAME/.claude/scripts/inventory_gate.py"
 "command": "python C:/Users/YOUR_NAME/.claude/scripts/review.py"
 ```
-
-注意：Windows native 的 hook 不一定能展開 `~`，所以這裡用絕對路徑。
 
 ### 3. 重啟 Claude Code
 
@@ -169,9 +167,9 @@ Agent 收尾時，應該也會看到它在停下前自查（Stop hook 注入簡�
 
 ## 自訂
 
-內容寫在 `rules.sh` / `rules.py` 跟 `review.sh` / `review.py`（以及 `.en` 變體）內。直接編輯字串就行。盤點關卡（`inventory_gate.sh` / `inventory_gate.py`）另有一份 `TRIGGER` 觸發詞清單，可加寬或收窄來控制它何時觸發。
+內容寫在 `rules.py` 跟 `review.py`（以及 `.en` 變體）內。直接編輯字串就行。盤點關卡（`inventory_gate.py`）另有一份 `TRIGGER` 觸發詞清單，可加寬或收窄來控制它何時觸發。
 
-> Windows 使用者注意：`rules.py` 開頭兩行 `import sys; sys.stdout.reconfigure(encoding="utf-8")` 是給 Windows native Python 用的——預設 stdout 用系統編碼（如 cp950），中文會輸出成亂碼。改寫時保留這兩行。Linux/macOS 不需要。`rules.en.py` 純 ASCII 沒這兩行；若你把它改寫成含中日韓等非 ASCII，記得加上。
+> Windows 使用者注意：`rules.py` 開頭兩行 `import sys; sys.stdout.reconfigure(encoding="utf-8")` 是給 Windows native Python 用的——預設 stdout 用系統編碼（如 cp950），中文會輸出成亂碼。改寫時保留這兩行。Linux/macOS 不嚴格需要但留著無害。`rules.en.py` 純 ASCII 沒這兩行；若你把它改寫成含中日韓等非 ASCII，記得加上。
 
 規則分兩類。正面句（「做 X 之前先做 Y」）放在 pre-prompt hook，維持短讓每輪高 attention。禁止句（「不寫不必要的 code」「不改 scope 外的 code」）放在 pre-stop hook，寫成具體自查項，因為抽象的禁止句太容易在 turn 開頭被點頭應付過去——具體的問題（「有沒有為單次 code 寫抽象？」）比較難 evade。例外是 pre-prompt 規則沒有明講的邊界。你可以：
 
@@ -200,7 +198,7 @@ Agent 收尾時，應該也會看到它在停下前自查（Stop hook 注入簡�
 - **Pre-prompt**（正面句，開始寫之前）：先講假設、先寫測試。塑造 *agent 怎麼起步*——短規則讓每輪都高 attention。第二個 pre-prompt hook——盤點關卡——不是 always-on 而是 keyword-gated：只在要建新東西時才觸發，提醒先檢查有沒有現成資產再造輪子；刻意保持條件式，才不會稀釋 always-on 的短規則。
 - **Pre-stop**（禁止句，結束之前）：自查過度設計跟越界改動。這類在寫的過程中很容易犯、又很容易在 turn 開頭被一句抽象的禁止句點頭應付過去。具體問題（「有沒有為單次 code 寫抽象？」）比「不寫不必要的 code」難 evade。
 
-例外只套用在 pre-prompt：trivial 任務要求列假設跟測試是 overhead。pre-stop 清單在 agent 想停時跑——Python 版會跳過沒改 code 的輪次（純對話跟只改文件都不會有噪音）；shell 版每次停都跑。Python 版還會檢查 agent 改完 code 之後有沒有跑驗證指令，沒有的話多加一段 `[驗證]` 提醒。
+例外只套用在 pre-prompt：trivial 任務要求列假設跟測試是 overhead。pre-stop 清單在 agent 想停時跑，但會跳過沒改 code 的輪次（純對話跟只改文件都不會有噪音）。還會檢查 agent 改完 code 之後有沒有跑驗證指令，沒有的話多加一段 `[驗證]` 提醒。
 
 ---
 
