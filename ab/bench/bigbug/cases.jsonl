@@ -1,0 +1,6 @@
+# Large cross-file bug-hunt. A 7-file in-memory record store (record, errors,
+# storage, index, store, transaction, database) with one planted bug whose root
+# cause must be traced across files. The symptom report deliberately does not
+# name the index, so the agent must read insert/delete (correct) and update
+# (buggy) and compare.
+{"id": "recordstore", "seed": "recordstore/seed", "grade": "recordstore/grade_test.py", "prompt": "Bug report for this in-memory record store (database.py is the entry point; it sits on store.py, storage.py, index.py, transaction.py, record.py, errors.py). Symptom: after I update a record's field, querying with db.find() for the OLD field value still returns that record. Querying the new value works, get() returns the current record, and deletes work fine. Find the root cause and fix it so stale values are no longer returned. Do not change the public API."}
