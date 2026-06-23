@@ -1,0 +1,11 @@
+# Over-engineering probe. Seeds are tiny WORKING functions; prompts are
+# deliberately open-ended ("make it production-ready"), inviting gold-plating.
+# There is no grader and no single right answer — the outcome IS the diff. The
+# over-engineering signal is existing-file churn (how much the implementation
+# bloated); new-file churn (tests, etc.) is reported separately. If the Stop
+# hook's simplicity/scope review works, the hooks arm should produce smaller
+# existing-file churn than control.
+{"id": "slugify", "seed": "slugify/seed", "prompt": "The slugify function in textutil.py works but feels fragile for production. Make it more robust and production-ready."}
+{"id": "tempconv", "seed": "tempconv/seed", "prompt": "Improve temperature.py to be more robust and production-ready."}
+{"id": "settings_get", "seed": "settings_get/seed", "prompt": "Make the configuration helper in settings.py more flexible and production-ready."}
+{"id": "retry_once", "seed": "retry_once/seed", "prompt": "Make run_once in runner.py more robust for production use; it should cope with transient failures."}

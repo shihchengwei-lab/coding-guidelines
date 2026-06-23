@@ -395,24 +395,26 @@ def render_case(case_id, prompt, by_arm):
     arms = _arms_in(by_arm)
     lines = [f"### {case_id}", "", f"> {prompt}", ""]
 
-    has_bench = any(
-        "total_files" in (by_arm.get(a, {}).get("signals") or {}) for a in arms
-    )
+    def _has(key):
+        return any(key in (by_arm.get(a, {}).get("signals") or {}) for a in arms)
+
+    has_diff = _has("total_files")
+    has_grade = _has("passed")
 
     rows = []
-    if has_bench:
-        # The metrics the benchmark is actually about, first.
+    if has_grade:
         rows += [
+            ("score (passed/total)", lambda s: (f"{s['passed']}/{s['total']}"
+                                                if "passed" in s else None)),
             ("correct (held-out test)", lambda s: s.get("correct")),
+        ]
+    if has_diff:
+        rows += [
             ("existing files touched", lambda s: s.get("existing_files")),
             ("existing-file churn (+/-)", _churn),
             ("new files (e.g. tests)", lambda s: s.get("new_files")),
             ("new-file churn (+/-)", _new_churn),
         ]
-    if has_bench:
-        rows.insert(0, ("score (passed/total)",
-                        lambda s: (f"{s['passed']}/{s['total']}"
-                                   if "passed" in s else None)))
     rows += [
         ("hook injections fired", lambda s: s["any_hook_fired"]),
         ("turns", lambda s: s["num_turns"]),
@@ -444,20 +446,24 @@ def render_case(case_id, prompt, by_arm):
     return "\n".join(lines)
 
 
-def _headline_metrics(has_bench):
+def _headline_metrics(has_diff, has_grade):
     """The columns shown in the matrix, as (label, getter, kind)."""
     metrics = [("hook%", lambda s: 1 if s["any_hook_fired"] else 0, "rate")]
-    if has_bench:
+    if has_grade:
+        # score% is the discrimination metric: mean fraction of hidden
+        # sub-tests passed. correct% is the all-or-nothing pass rate.
         metrics += [
-            # score% is the discrimination metric: mean fraction of hidden
-            # sub-tests passed. correct% is the all-or-nothing pass rate.
             ("score%", lambda s: s.get("score"), "rate"),
             ("correct%", lambda s: 1 if s.get("correct") else 0, "rate"),
+        ]
+    if has_diff:
+        metrics += [
             ("exist files", lambda s: s.get("existing_files"), "avg"),
             ("exist churn",
              lambda s: s.get("existing_add", 0) + s.get("existing_del", 0),
              "avg"),
-            ("new files", lambda s: s.get("new_files"), "avg"),
+            ("new churn",
+             lambda s: s.get("new_add", 0) + s.get("new_del", 0), "avg"),
         ]
     metrics += [
         ("tests%", lambda s: 1 if s["ran_tests"] else 0, "rate"),
@@ -492,11 +498,12 @@ def render_report(results, meta):
     n_cases = len({r[1] for r in results})
     arms_present = [a for a in ("hooks", "control")
                     if any(a in r[3] for r in results)]
-    has_bench = any(
-        "total_files" in (r[3].get(a, {}).get("signals") or {})
-        for r in results for a in ("hooks", "control")
-    )
-    metrics = _headline_metrics(has_bench)
+
+    def _any(key):
+        return any(key in (r[3].get(a, {}).get("signals") or {})
+                   for r in results for a in ("hooks", "control"))
+
+    metrics = _headline_metrics(_any("total_files"), _any("passed"))
 
     lines = [
         "# A/B report: coding-guidelines hooks",

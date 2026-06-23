@@ -290,12 +290,12 @@ class TestReport(unittest.TestCase):
         h = run_ab.extract_signals(HOOKS_TRANSCRIPT)
         h.update({"existing_files": 1, "existing_add": 1, "existing_del": 1,
                   "new_files": 1, "new_add": 20, "new_del": 0,
-                  "total_files": 2, "correct": True})
+                  "total_files": 2, "passed": 8, "total": 8, "correct": True})
         # control: correct but sloppy — touched 2 existing files, bigger churn
         c = run_ab.extract_signals(CONTROL_TRANSCRIPT)
         c.update({"existing_files": 2, "existing_add": 18, "existing_del": 9,
                   "new_files": 0, "new_add": 0, "new_del": 0,
-                  "total_files": 2, "correct": True})
+                  "total_files": 2, "passed": 8, "total": 8, "correct": True})
         return [("sonnet", "bugfix", "Fix the bug.",
                  {"hooks": {"signals": h, "judge": None},
                   "control": {"signals": c, "judge": None}})]
@@ -314,6 +314,22 @@ class TestReport(unittest.TestCase):
         self.assertIn("correct%", out)
         self.assertIn("exist files", out)
         self.assertIn("exist churn", out)
+
+    def test_graderless_diff_task_hides_correctness(self):
+        # An over-engineering task: diff measured, but no grader.
+        h = run_ab.extract_signals(HOOKS_TRANSCRIPT)
+        h.update({"existing_files": 1, "existing_add": 12, "existing_del": 0,
+                  "new_files": 1, "new_add": 30, "new_del": 0, "total_files": 2})
+        c = run_ab.extract_signals(CONTROL_TRANSCRIPT)
+        c.update({"existing_files": 1, "existing_add": 48, "existing_del": 0,
+                  "new_files": 0, "new_add": 0, "new_del": 0, "total_files": 1})
+        results = [("opus", "robustify", "Make it production-ready.",
+                    {"hooks": {"signals": h, "judge": None},
+                     "control": {"signals": c, "judge": None}})]
+        out = run_ab.render_report(results, {"generated": "n", "lang": "en"})
+        self.assertIn("exist churn", out)
+        self.assertNotIn("correct%", out)
+        self.assertNotIn("score%", out)
 
     def test_render_with_judge(self):
         _model, cid, prompt, by_arm = self._results()[0]
