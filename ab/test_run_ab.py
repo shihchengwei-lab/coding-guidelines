@@ -203,6 +203,31 @@ class TestCopySeed(unittest.TestCase):
             self.assertEqual(run_ab.copy_seed(None, Path(tmp) / "ws"), [])
 
 
+class TestGrade(unittest.TestCase):
+    def test_score_line_parsed(self):
+        g = run_ab.parse_grade_output("blah\nSCORE 7 10\n", 1)
+        self.assertEqual((g["passed"], g["total"]), (7, 10))
+        self.assertAlmostEqual(g["score"], 0.7)
+        self.assertFalse(g["correct"])
+
+    def test_full_score_is_correct(self):
+        g = run_ab.parse_grade_output("SCORE 10 10", 0)
+        self.assertTrue(g["correct"])
+        self.assertEqual(g["score"], 1.0)
+
+    def test_slash_form(self):
+        g = run_ab.parse_grade_output("SCORE 3/5", 1)
+        self.assertEqual((g["passed"], g["total"]), (3, 5))
+
+    def test_legacy_passfail_no_score_line(self):
+        ok = run_ab.parse_grade_output("OK", 0)
+        self.assertEqual((ok["passed"], ok["total"]), (1, 1))
+        self.assertTrue(ok["correct"])
+        bad = run_ab.parse_grade_output("AssertionError", 1)
+        self.assertEqual((bad["passed"], bad["total"]), (0, 1))
+        self.assertFalse(bad["correct"])
+
+
 class TestJudge(unittest.TestCase):
     def test_build_prompt_contains_transcript(self):
         p = run_ab.build_judge_prompt("THE TRANSCRIPT")

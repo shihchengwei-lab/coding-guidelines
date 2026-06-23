@@ -310,6 +310,25 @@ JUDGE_INSTRUCTIONS = (
 )
 
 
+def parse_grade_output(stdout, returncode):
+    """Parse a grader's result into a fractional score.
+
+    Graders may print a line `SCORE k n` (k of n hidden sub-tests passed) for
+    resolution; older pass/fail graders just exit 0/non-zero, treated as 1/1.
+    """
+    m = re.search(r"SCORE\s+(\d+)\s*/?\s*(\d+)", stdout or "")
+    if m:
+        passed, total = int(m.group(1)), int(m.group(2))
+    else:
+        passed, total = (1, 1) if returncode == 0 else (0, 1)
+    return {
+        "passed": passed,
+        "total": total,
+        "score": (passed / total) if total else None,
+        "correct": total > 0 and passed == total,
+    }
+
+
 def build_judge_prompt(transcript_summary):
     """Build the prompt fed to the judge for one transcript."""
     return (
@@ -367,9 +386,13 @@ def _new_churn(s):
     return f"+{s['new_add']}/-{s['new_del']}"
 
 
+def _arms_in(by_arm):
+    return [a for a in ("hooks", "control") if a in by_arm]
+
+
 def render_case(case_id, prompt, by_arm):
-    """Render one case's two-arm comparison as a Markdown section."""
-    arms = ["hooks", "control"]
+    """Render one case's per-arm comparison as a Markdown section."""
+    arms = _arms_in(by_arm)
     lines = [f"### {case_id}", "", f"> {prompt}", ""]
 
     has_bench = any(
@@ -386,6 +409,10 @@ def render_case(case_id, prompt, by_arm):
             ("new files (e.g. tests)", lambda s: s.get("new_files")),
             ("new-file churn (+/-)", _new_churn),
         ]
+    if has_bench:
+        rows.insert(0, ("score (passed/total)",
+                        lambda s: (f"{s['passed']}/{s['total']}"
+                                   if "passed" in s else None)))
     rows += [
         ("hook injections fired", lambda s: s["any_hook_fired"]),
         ("turns", lambda s: s["num_turns"]),
@@ -395,25 +422,23 @@ def render_case(case_id, prompt, by_arm):
         ("error", lambda s: s["is_error"]),
     ]
 
-    lines.append("| signal | hooks | control |")
-    lines.append("|---|---|---|")
+    lines.append("| signal | " + " | ".join(arms) + " |")
+    lines.append("|" + "---|" * (1 + len(arms)))
     for label, getter in rows:
         cells = []
         for arm in arms:
             sig = by_arm.get(arm, {}).get("signals")
             cells.append(_fmt(getter(sig)) if sig else "-")
-        lines.append(f"| {label} | {cells[0]} | {cells[1]} |")
+        lines.append(f"| {label} | " + " | ".join(cells) + " |")
 
     # Judge scores, if present.
-    judged = any(by_arm.get(a, {}).get("judge") for a in arms)
-    if judged:
-        lines += ["", "| judge dimension | hooks | control |", "|---|---|---|"]
+    if any(by_arm.get(a, {}).get("judge") for a in arms):
+        lines += ["", "| judge dimension | " + " | ".join(arms) + " |",
+                  "|" + "---|" * (1 + len(arms))]
         for dim in JUDGE_DIMENSIONS:
-            cells = []
-            for arm in arms:
-                j = by_arm.get(arm, {}).get("judge") or {}
-                cells.append(_fmt(j.get(dim)))
-            lines.append(f"| {dim} | {cells[0]} | {cells[1]} |")
+            cells = [_fmt((by_arm.get(arm, {}).get("judge") or {}).get(dim))
+                     for arm in arms]
+            lines.append(f"| {dim} | " + " | ".join(cells) + " |")
 
     lines.append("")
     return "\n".join(lines)
@@ -424,6 +449,9 @@ def _headline_metrics(has_bench):
     metrics = [("hook%", lambda s: 1 if s["any_hook_fired"] else 0, "rate")]
     if has_bench:
         metrics += [
+            # score% is the discrimination metric: mean fraction of hidden
+            # sub-tests passed. correct% is the all-or-nothing pass rate.
+            ("score%", lambda s: s.get("score"), "rate"),
             ("correct%", lambda s: 1 if s.get("correct") else 0, "rate"),
             ("exist files", lambda s: s.get("existing_files"), "avg"),
             ("exist churn",
@@ -462,6 +490,8 @@ def render_report(results, meta):
         if r[0] not in models:
             models.append(r[0])
     n_cases = len({r[1] for r in results})
+    arms_present = [a for a in ("hooks", "control")
+                    if any(a in r[3] for r in results)]
     has_bench = any(
         "total_files" in (r[3].get(a, {}).get("signals") or {})
         for r in results for a in ("hooks", "control")
@@ -486,7 +516,7 @@ def render_report(results, meta):
     lines += [header, "|" + "---|" * (2 + len(metrics))]
     for model in models:
         mrows = [r for r in results if r[0] == model]
-        for arm in ("hooks", "control"):
+        for arm in arms_present:
             cells = [_agg_cell(mrows, arm, g, k) for _, g, k in metrics]
             lines.append(f"| {model} | {arm} | " + " | ".join(cells) + " |")
 
@@ -574,13 +604,13 @@ def diff_numstat(ws):
 
 
 def run_grade(grade_abs, ws, timeout):
-    """Run the held-out grader against the workspace. True=correct, None=no grader."""
+    """Run the held-out grader. Returns a fractional-score dict, or None."""
     if not grade_abs:
         return None
     proc = subprocess.run(
         [sys.executable, str(grade_abs), str(ws)],
         capture_output=True, text=True, timeout=timeout)
-    return proc.returncode == 0
+    return parse_grade_output(proc.stdout, proc.returncode)
 
 
 def run_arm(prompt, settings, settings_path, cwd, model, max_turns, timeout):
@@ -632,6 +662,8 @@ def main(argv=None):
     ap.add_argument("--timeout", type=int, default=900, help="per-run seconds")
     ap.add_argument("--out", default=str(here / "runs"))
     ap.add_argument("--repeat", type=int, default=1, help="runs per (case,arm)")
+    ap.add_argument("--arms", default="hooks,control",
+                    help="comma list; use 'control' alone to calibrate")
     ap.add_argument("--judge", action="store_true", help="run LLM judge")
     ap.add_argument("--judge-model", default=None)
     ap.add_argument(
@@ -648,7 +680,7 @@ def main(argv=None):
     )
     stamp = time.strftime("%Y%m%d-%H%M%S")
     out_root = Path(args.out) / stamp
-    arms = ["hooks", "control"]
+    arms = [a.strip() for a in args.arms.split(",") if a.strip()]
 
     def model_dir(model):
         return model or "default"
@@ -708,10 +740,12 @@ def main(argv=None):
                     last_signals.update(
                         parse_numstat(diff_numstat(ws), seed_files))
                     try:
-                        last_signals["correct"] = run_grade(
+                        grade = run_grade(
                             case.get("grade_abs"), ws, args.timeout)
                     except subprocess.TimeoutExpired:
-                        last_signals["correct"] = None
+                        grade = None
+                    if grade:
+                        last_signals.update(grade)
                     last_summary = parsed["assistant_text"] or parsed["result"]
                     (workdir / "signals.json").write_text(
                         json.dumps(last_signals, indent=2), encoding="utf-8")

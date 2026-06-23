@@ -1,0 +1,10 @@
+# Hard, discriminating benchmark: algorithmic fill-in tasks with edge-case-rich
+# fractional graders (SCORE k n). The seed is a stub raising NotImplementedError;
+# the agent must implement it. Designed so model strength separates (a valid
+# baseline must distinguish haiku < sonnet < opus before it can measure a hook).
+{"id": "wildcard_match", "seed": "wildcard_match/seed", "grade": "wildcard_match/grade_test.py", "prompt": "Implement the is_match(text, pattern) function in glob_match.py as described in its docstring (wildcard matching with '?' and '*')."}
+{"id": "eval_expr", "seed": "eval_expr/seed", "grade": "eval_expr/grade_test.py", "prompt": "Implement the evaluate(expr) function in calc.py as described in its docstring (integer arithmetic with precedence, parentheses, unary minus, and ValueError on malformed input)."}
+{"id": "semver_compare", "seed": "semver_compare/seed", "grade": "semver_compare/grade_test.py", "prompt": "Implement the compare(a, b) function in semver.py as described in its docstring (semantic-version precedence including prerelease and build-metadata rules)."}
+{"id": "lru_cache", "seed": "lru_cache/seed", "grade": "lru_cache/grade_test.py", "prompt": "Implement the LRUCache class in lru.py as described in its docstring (fixed-capacity least-recently-used cache with get and put)."}
+{"id": "topo_sort", "seed": "topo_sort/seed", "grade": "topo_sort/grade_test.py", "prompt": "Implement the topo_sort(graph) function in topo.py as described in its docstring (deterministic topological sort with smallest-node tie-break and cycle detection)."}
+{"id": "interval_merge", "seed": "interval_merge/seed", "grade": "interval_merge/grade_test.py", "prompt": "Implement the merge(intervals) function in intervals.py as described in its docstring (merge overlapping or touching intervals without mutating the input)."}
