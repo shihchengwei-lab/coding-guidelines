@@ -214,6 +214,41 @@ def bash_commands(tool_calls):
     return cmds
 
 
+def parse_numstat(text, seed_files):
+    """Parse `git diff --numstat` output, splitting existing vs new files.
+
+    seed_files is the set of paths that existed at baseline. Changes to those
+    are the scope-discipline signal; everything else is a newly added file
+    (typically a test the agent wrote). Binary files (numstat '-') count as 0
+    lines but still count as a touched file.
+    """
+    seed = set(seed_files)
+    r = {
+        "existing_files": 0, "existing_add": 0, "existing_del": 0,
+        "new_files": 0, "new_add": 0, "new_del": 0,
+    }
+    for line in text.splitlines():
+        parts = line.split("\t")
+        if len(parts) != 3:
+            continue
+        a, d, path = parts
+        # Renames render as "old => new" (or "{a => b}"); attribute to new path.
+        if "=>" in path:
+            path = path.split("=>")[-1].strip().strip("}").strip()
+        add = 0 if a == "-" else int(a)
+        dele = 0 if d == "-" else int(d)
+        if path in seed:
+            r["existing_files"] += 1
+            r["existing_add"] += add
+            r["existing_del"] += dele
+        else:
+            r["new_files"] += 1
+            r["new_add"] += add
+            r["new_del"] += dele
+    r["total_files"] = r["existing_files"] + r["new_files"]
+    return r
+
+
 def extract_signals(raw, parsed=None):
     """Derive deterministic behavioural signals from a raw transcript."""
     if parsed is None:
@@ -319,19 +354,44 @@ def _fmt(v):
     return str(v)
 
 
+def _churn(s):
+    """Format existing-file churn as +A/-D, or '-' if not a benchmark run."""
+    if "existing_add" not in s:
+        return None
+    return f"+{s['existing_add']}/-{s['existing_del']}"
+
+
+def _new_churn(s):
+    if "new_add" not in s:
+        return None
+    return f"+{s['new_add']}/-{s['new_del']}"
+
+
 def render_case(case_id, prompt, by_arm):
     """Render one case's two-arm comparison as a Markdown section."""
     arms = ["hooks", "control"]
     lines = [f"### {case_id}", "", f"> {prompt}", ""]
 
-    rows = [
+    has_bench = any(
+        "total_files" in (by_arm.get(a, {}).get("signals") or {}) for a in arms
+    )
+
+    rows = []
+    if has_bench:
+        # The metrics the benchmark is actually about, first.
+        rows += [
+            ("correct (held-out test)", lambda s: s.get("correct")),
+            ("existing files touched", lambda s: s.get("existing_files")),
+            ("existing-file churn (+/-)", _churn),
+            ("new files (e.g. tests)", lambda s: s.get("new_files")),
+            ("new-file churn (+/-)", _new_churn),
+        ]
+    rows += [
         ("hook injections fired", lambda s: s["any_hook_fired"]),
         ("turns", lambda s: s["num_turns"]),
         ("tool calls", lambda s: s["n_tool_calls"]),
-        ("files written", lambda s: s["files_written"]),
         ("ran tests", lambda s: s["ran_tests"]),
-        ("mentions assumptions (heuristic)", lambda s: s["mentions_assumptions"]),
-        ("cost (USD)", lambda s: s["total_cost_usd"]),
+        ("cost (USD-equiv)", lambda s: s["total_cost_usd"]),
         ("error", lambda s: s["is_error"]),
     ]
 
@@ -386,13 +446,29 @@ def render_report(results, meta):
         ]
         return vals
 
+    has_bench = any(
+        "total_files" in (c[2].get(a, {}).get("signals") or {})
+        for c in results for a in ("hooks", "control")
+    )
+
     lines += ["| metric | hooks | control |", "|---|---|---|"]
     headline = [
         ("hook fired rate", lambda s: 1 if s["any_hook_fired"] else 0, "rate"),
+    ]
+    if has_bench:
+        headline += [
+            ("correct rate", lambda s: 1 if s.get("correct") else 0, "rate"),
+            ("avg existing files touched",
+             lambda s: s.get("existing_files"), "avg"),
+            ("avg existing-file churn (lines)",
+             lambda s: (s.get("existing_add", 0) + s.get("existing_del", 0)),
+             "avg"),
+            ("avg new files", lambda s: s.get("new_files"), "avg"),
+        ]
+    headline += [
         ("ran-tests rate", lambda s: 1 if s["ran_tests"] else 0, "rate"),
         ("avg turns", lambda s: s["num_turns"], "avg"),
-        ("avg tool calls", lambda s: s["n_tool_calls"], "avg"),
-        ("avg cost (USD)", lambda s: s["total_cost_usd"], "avg"),
+        ("avg cost (USD-equiv)", lambda s: s["total_cost_usd"], "avg"),
     ]
     for label, getter, kind in headline:
         cells = []
@@ -418,6 +494,8 @@ def render_report(results, meta):
 # ---------------------------------------------------------------------------
 
 def load_cases(path):
+    """Load cases; resolve optional seed/grade paths relative to the manifest."""
+    base = Path(path).resolve().parent
     cases = []
     with open(path, encoding="utf-8") as f:
         for line in f:
@@ -425,18 +503,66 @@ def load_cases(path):
             if not line or line.startswith("#"):
                 continue
             obj = json.loads(line)
+            if obj.get("seed"):
+                obj["seed_abs"] = str((base / obj["seed"]).resolve())
+            if obj.get("grade"):
+                obj["grade_abs"] = str((base / obj["grade"]).resolve())
             cases.append(obj)
     return cases
 
 
-def run_arm(prompt, settings, workdir, model, max_turns, timeout):
+def _git(ws, *args):
+    return subprocess.run(
+        ["git", "-C", str(ws), *args], capture_output=True, text=True)
+
+
+def prepare_workspace(ws, seed_dir):
+    """Copy seed into a fresh git workspace and commit a baseline.
+
+    Returns the list of seed-relative file paths (the baseline file set), used
+    later to tell existing-file edits from newly created files.
+    """
+    ws.mkdir(parents=True, exist_ok=True)
+    seed_files = []
+    if seed_dir:
+        seed_root = Path(seed_dir)
+        for src in sorted(seed_root.rglob("*")):
+            if src.is_file():
+                rel = src.relative_to(seed_root)
+                dst = ws / rel
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                dst.write_bytes(src.read_bytes())
+                seed_files.append(str(rel))
+    _git(ws, "init", "-q")
+    _git(ws, "add", "-A")
+    _git(ws, "-c", "user.email=ab@local", "-c", "user.name=ab",
+         "commit", "-q", "--allow-empty", "-m", "baseline")
+    return seed_files
+
+
+def diff_numstat(ws):
+    """Return `git diff --numstat` of the workspace vs baseline (incl. new files)."""
+    _git(ws, "add", "-A")
+    return _git(ws, "diff", "--numstat", "--cached", "HEAD").stdout
+
+
+def run_grade(grade_abs, ws, timeout):
+    """Run the held-out grader against the workspace. True=correct, None=no grader."""
+    if not grade_abs:
+        return None
+    proc = subprocess.run(
+        [sys.executable, str(grade_abs), str(ws)],
+        capture_output=True, text=True, timeout=timeout)
+    return proc.returncode == 0
+
+
+def run_arm(prompt, settings, settings_path, cwd, model, max_turns, timeout):
     """Run one arm; return (raw_transcript, stderr). Impure: shells out."""
-    settings_path = workdir / "settings.json"
     settings_path.write_text(json.dumps(settings), encoding="utf-8")
     cmd = build_command(prompt, settings_path, model, max_turns)
     proc = subprocess.run(
         cmd,
-        cwd=str(workdir),
+        cwd=str(cwd),
         capture_output=True,
         text=True,
         timeout=timeout,
@@ -469,7 +595,7 @@ def run_judge(transcript_summary, model, timeout):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
     here = Path(__file__).resolve().parent
-    ap.add_argument("--cases", default=str(here / "cases.jsonl"))
+    ap.add_argument("--cases", default=str(here / "bench" / "cases.jsonl"))
     ap.add_argument("--repo-root", default=str(here.parent))
     ap.add_argument("--lang", choices=["en", "zh"], default="en")
     ap.add_argument("--model", default=None, help="e.g. sonnet, opus")
@@ -500,6 +626,8 @@ def main(argv=None):
                 cmd = build_command(case["prompt"], "<workdir>/settings.json",
                                     args.model, args.max_turns)
                 print(f"## {case['id']} [{arm}]")
+                if case.get("seed"):
+                    print("seed:", case["seed"], "| grade:", case.get("grade"))
                 print("settings:", json.dumps(settings))
                 print("cmd:", " ".join(shlex.quote(c) for c in cmd))
                 print()
@@ -519,11 +647,14 @@ def main(argv=None):
             for rep in range(args.repeat):
                 workdir = out_root / case["id"] / arm / f"rep{rep}"
                 workdir.mkdir(parents=True, exist_ok=True)
+                ws = workdir / "ws"
+                seed_files = prepare_workspace(ws, case.get("seed_abs"))
                 print(f"[run] {case['id']} {arm} rep{rep} ...",
                       file=sys.stderr)
                 try:
                     raw, err = run_arm(
-                        case["prompt"], settings, workdir,
+                        case["prompt"], settings,
+                        workdir / "settings.json", ws,
                         args.model, args.max_turns, args.timeout,
                     )
                 except subprocess.TimeoutExpired:
@@ -532,6 +663,13 @@ def main(argv=None):
                 (workdir / "stderr.log").write_text(err or "", encoding="utf-8")
                 parsed = parse_stream(raw)
                 last_signals = extract_signals(raw, parsed)
+                # Ground-truth diff + correctness from the workspace.
+                last_signals.update(parse_numstat(diff_numstat(ws), seed_files))
+                try:
+                    last_signals["correct"] = run_grade(
+                        case.get("grade_abs"), ws, args.timeout)
+                except subprocess.TimeoutExpired:
+                    last_signals["correct"] = None
                 last_summary = parsed["assistant_text"] or parsed["result"]
                 (workdir / "signals.json").write_text(
                     json.dumps(last_signals, indent=2), encoding="utf-8")

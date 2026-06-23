@@ -1,0 +1,6 @@
+# Modification benchmark. Each case seeds an existing codebase, asks for a
+# small change, and is graded by a held-out test. Paths are relative to this
+# file's directory. The grader is NOT copied into the agent's workspace.
+{"id": "bugfix_offbyone", "seed": "bugfix_offbyone/seed", "grade": "bugfix_offbyone/grade_test.py", "prompt": "In ranges.py, inclusive_range(start, end) is documented to include end but currently excludes it. Fix it so the end value is included."}
+{"id": "add_upper_flag", "seed": "add_upper_flag/seed", "grade": "add_upper_flag/grade_test.py", "prompt": "In echo_lines.py, add a --upper flag that uppercases each printed line. Default behavior (no flag) must stay exactly the same."}
+{"id": "reject_negative", "seed": "reject_negative/seed", "grade": "reject_negative/grade_test.py", "prompt": "In orders.py, total_price should raise ValueError when quantity is negative. Add that validation."}

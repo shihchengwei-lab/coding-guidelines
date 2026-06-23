@@ -149,6 +149,36 @@ class TestSignals(unittest.TestCase):
         self.assertFalse(run_ab.extract_signals(raw)["ran_tests"])
 
 
+class TestNumstat(unittest.TestCase):
+    def test_splits_existing_vs_new(self):
+        # ranges.py existed at baseline; test_ranges.py is new.
+        text = "1\t1\tranges.py\n40\t0\ttest_ranges.py\n"
+        r = run_ab.parse_numstat(text, ["ranges.py"])
+        self.assertEqual(r["existing_files"], 1)
+        self.assertEqual(r["existing_add"], 1)
+        self.assertEqual(r["existing_del"], 1)
+        self.assertEqual(r["new_files"], 1)
+        self.assertEqual(r["new_add"], 40)
+        self.assertEqual(r["total_files"], 2)
+
+    def test_binary_counts_as_file_zero_lines(self):
+        text = "-\t-\tlogo.png\n"
+        r = run_ab.parse_numstat(text, ["ranges.py"])
+        self.assertEqual(r["new_files"], 1)
+        self.assertEqual(r["new_add"], 0)
+
+    def test_rename_attributed_to_new_path(self):
+        text = "0\t0\told.py => new.py\n"
+        r = run_ab.parse_numstat(text, ["old.py"])
+        # new.py is not in seed set -> counts as new
+        self.assertEqual(r["new_files"], 1)
+        self.assertEqual(r["existing_files"], 0)
+
+    def test_empty_diff(self):
+        r = run_ab.parse_numstat("", ["ranges.py"])
+        self.assertEqual(r["total_files"], 0)
+
+
 class TestJudge(unittest.TestCase):
     def test_build_prompt_contains_transcript(self):
         p = run_ab.build_judge_prompt("THE TRANSCRIPT")
@@ -196,6 +226,34 @@ class TestReport(unittest.TestCase):
         self.assertIn("# A/B report", out)
         self.assertIn("Aggregate", out)
         self.assertIn("hook fired rate", out)
+
+    def _bench_results(self):
+        # hooks: minimal correct edit (1 existing file, small churn) + a test file
+        h = run_ab.extract_signals(HOOKS_TRANSCRIPT)
+        h.update({"existing_files": 1, "existing_add": 1, "existing_del": 1,
+                  "new_files": 1, "new_add": 20, "new_del": 0,
+                  "total_files": 2, "correct": True})
+        # control: correct but sloppy — touched 2 existing files, bigger churn
+        c = run_ab.extract_signals(CONTROL_TRANSCRIPT)
+        c.update({"existing_files": 2, "existing_add": 18, "existing_del": 9,
+                  "new_files": 0, "new_add": 0, "new_del": 0,
+                  "total_files": 2, "correct": True})
+        return [("bugfix", "Fix the bug.",
+                 {"hooks": {"signals": h, "judge": None},
+                  "control": {"signals": c, "judge": None}})]
+
+    def test_bench_rows_render(self):
+        out = run_ab.render_case(*self._bench_results()[0])
+        self.assertIn("correct (held-out test)", out)
+        self.assertIn("existing files touched", out)
+        self.assertIn("existing-file churn", out)
+        self.assertIn("new files", out)
+
+    def test_bench_aggregate_has_correct_rate(self):
+        meta = {"generated": "n", "model": "m", "lang": "en", "judge": False}
+        out = run_ab.render_report(self._bench_results(), meta)
+        self.assertIn("correct rate", out)
+        self.assertIn("avg existing files touched", out)
 
     def test_render_with_judge(self):
         results = self._results()
