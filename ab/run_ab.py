@@ -419,72 +419,82 @@ def render_case(case_id, prompt, by_arm):
     return "\n".join(lines)
 
 
+def _headline_metrics(has_bench):
+    """The columns shown in the matrix, as (label, getter, kind)."""
+    metrics = [("hook%", lambda s: 1 if s["any_hook_fired"] else 0, "rate")]
+    if has_bench:
+        metrics += [
+            ("correct%", lambda s: 1 if s.get("correct") else 0, "rate"),
+            ("exist files", lambda s: s.get("existing_files"), "avg"),
+            ("exist churn",
+             lambda s: s.get("existing_add", 0) + s.get("existing_del", 0),
+             "avg"),
+            ("new files", lambda s: s.get("new_files"), "avg"),
+        ]
+    metrics += [
+        ("tests%", lambda s: 1 if s["ran_tests"] else 0, "rate"),
+        ("turns", lambda s: s["num_turns"], "avg"),
+        ("cost$", lambda s: s["total_cost_usd"], "avg"),
+    ]
+    return metrics
+
+
+def _agg_cell(rows, arm, getter, kind):
+    """Aggregate one metric over rows (each a (model, id, prompt, by_arm))."""
+    vals = [
+        getter(r[3][arm]["signals"])
+        for r in rows
+        if r[3].get(arm, {}).get("signals") is not None
+        and getter(r[3][arm]["signals"]) is not None
+    ]
+    if not vals:
+        return "-"
+    if kind == "rate":
+        return f"{sum(vals) / len(vals):.0%}"
+    return f"{sum(vals) / len(vals):.3g}"
+
+
 def render_report(results, meta):
-    """Render the full report. `results` is a list of (case_id, prompt, by_arm)."""
+    """Render the matrix report. `results` is a list of
+    (model, case_id, prompt, by_arm)."""
+    models = []
+    for r in results:
+        if r[0] not in models:
+            models.append(r[0])
+    n_cases = len({r[1] for r in results})
+    has_bench = any(
+        "total_files" in (r[3].get(a, {}).get("signals") or {})
+        for r in results for a in ("hooks", "control")
+    )
+    metrics = _headline_metrics(has_bench)
+
     lines = [
         "# A/B report: coding-guidelines hooks",
         "",
         f"- generated: {meta.get('generated', '')}",
-        f"- model: {meta.get('model', '')}",
+        f"- models: {', '.join(str(m) for m in models)}",
         f"- lang: {meta.get('lang', '')}",
-        f"- cases: {len(results)}",
+        f"- cases: {n_cases}",
         f"- judge: {'on' if meta.get('judge') else 'off'}",
         "",
         "Arm **hooks** = this repo's hooks enabled. Arm **control** = no hooks.",
         "",
-        "## Aggregate",
+        "## Matrix (averaged across cases)",
         "",
     ]
-
-    # Aggregate a few headline numbers across cases.
-    def agg(arm, getter):
-        vals = [
-            getter(c[2][arm]["signals"])
-            for c in results
-            if c[2].get(arm, {}).get("signals") is not None
-            and getter(c[2][arm]["signals"]) is not None
-        ]
-        return vals
-
-    has_bench = any(
-        "total_files" in (c[2].get(a, {}).get("signals") or {})
-        for c in results for a in ("hooks", "control")
-    )
-
-    lines += ["| metric | hooks | control |", "|---|---|---|"]
-    headline = [
-        ("hook fired rate", lambda s: 1 if s["any_hook_fired"] else 0, "rate"),
-    ]
-    if has_bench:
-        headline += [
-            ("correct rate", lambda s: 1 if s.get("correct") else 0, "rate"),
-            ("avg existing files touched",
-             lambda s: s.get("existing_files"), "avg"),
-            ("avg existing-file churn (lines)",
-             lambda s: (s.get("existing_add", 0) + s.get("existing_del", 0)),
-             "avg"),
-            ("avg new files", lambda s: s.get("new_files"), "avg"),
-        ]
-    headline += [
-        ("ran-tests rate", lambda s: 1 if s["ran_tests"] else 0, "rate"),
-        ("avg turns", lambda s: s["num_turns"], "avg"),
-        ("avg cost (USD-equiv)", lambda s: s["total_cost_usd"], "avg"),
-    ]
-    for label, getter, kind in headline:
-        cells = []
+    header = "| model | arm | " + " | ".join(m[0] for m in metrics) + " |"
+    lines += [header, "|" + "---|" * (2 + len(metrics))]
+    for model in models:
+        mrows = [r for r in results if r[0] == model]
         for arm in ("hooks", "control"):
-            vals = agg(arm, getter)
-            if not vals:
-                cells.append("-")
-            elif kind == "rate":
-                cells.append(f"{sum(vals) / len(vals):.0%}")
-            else:
-                cells.append(f"{sum(vals) / len(vals):.4g}")
-        lines.append(f"| {label} | {cells[0]} | {cells[1]} |")
+            cells = [_agg_cell(mrows, arm, g, k) for _, g, k in metrics]
+            lines.append(f"| {model} | {arm} | " + " | ".join(cells) + " |")
 
-    lines += ["", "## Per case", ""]
-    for case_id, prompt, by_arm in results:
-        lines.append(render_case(case_id, prompt, by_arm))
+    for model in models:
+        lines += ["", f"## Detail: {model}", ""]
+        for r in results:
+            if r[0] == model:
+                lines.append(render_case(r[1], r[2], r[3]))
 
     return "\n".join(lines)
 
@@ -615,7 +625,9 @@ def main(argv=None):
     ap.add_argument("--cases", default=str(here / "bench" / "cases.jsonl"))
     ap.add_argument("--repo-root", default=str(here.parent))
     ap.add_argument("--lang", choices=["en", "zh"], default="en")
-    ap.add_argument("--model", default=None, help="e.g. sonnet, opus")
+    ap.add_argument("--model", default=None, help="single model, e.g. sonnet")
+    ap.add_argument("--models", default=None,
+                    help="comma-separated model matrix, e.g. haiku,sonnet,opus")
     ap.add_argument("--max-turns", type=int, default=30)
     ap.add_argument("--timeout", type=int, default=900, help="per-run seconds")
     ap.add_argument("--out", default=str(here / "runs"))
@@ -630,90 +642,100 @@ def main(argv=None):
     args = ap.parse_args(argv)
 
     cases = load_cases(args.cases)
+    models = (
+        [m.strip() for m in args.models.split(",") if m.strip()]
+        if args.models else [args.model]
+    )
     stamp = time.strftime("%Y%m%d-%H%M%S")
     out_root = Path(args.out) / stamp
     arms = ["hooks", "control"]
 
+    def model_dir(model):
+        return model or "default"
+
     if args.dry_run:
-        print(f"# dry-run: {len(cases)} cases x {len(arms)} arms x "
-              f"{args.repeat} repeat(s)\n")
-        for case in cases:
-            for arm in arms:
-                settings = build_settings(args.repo_root, args.lang, arm)
-                cmd = build_command(case["prompt"], "<workdir>/settings.json",
-                                    args.model, args.max_turns)
-                print(f"## {case['id']} [{arm}]")
-                if case.get("seed"):
-                    print("seed:", case["seed"], "| grade:", case.get("grade"))
-                print("settings:", json.dumps(settings))
-                print("cmd:", " ".join(shlex.quote(c) for c in cmd))
-                print()
+        print(f"# dry-run: {len(models)} model(s) x {len(cases)} cases x "
+              f"{len(arms)} arms x {args.repeat} repeat(s)\n")
+        for model in models:
+            for case in cases:
+                for arm in arms:
+                    settings = build_settings(args.repo_root, args.lang, arm)
+                    cmd = build_command(case["prompt"], "<workdir>/settings.json",
+                                        model, args.max_turns)
+                    print(f"## [{model_dir(model)}] {case['id']} [{arm}]")
+                    if case.get("seed"):
+                        print("seed:", case["seed"], "| grade:",
+                              case.get("grade"))
+                    print("cmd:", " ".join(shlex.quote(c) for c in cmd))
+                    print()
         return 0
 
     out_root.mkdir(parents=True, exist_ok=True)
     results = []
 
-    for case in cases:
-        by_arm = {}
-        for arm in arms:
-            # For repeat>1 we keep the last run's signals but could average;
-            # default repeat=1 keeps it simple and honest.
-            settings = build_settings(args.repo_root, args.lang, arm)
-            last_signals = None
-            last_summary = None
-            for rep in range(args.repeat):
-                workdir = out_root / case["id"] / arm / f"rep{rep}"
-                workdir.mkdir(parents=True, exist_ok=True)
-                ws = workdir / "ws"
-                seed_files = prepare_workspace(ws, case.get("seed_abs"))
-                print(f"[run] {case['id']} {arm} rep{rep} ...",
-                      file=sys.stderr)
-                try:
-                    raw, err = run_arm(
-                        case["prompt"], settings,
-                        workdir / "settings.json", ws,
-                        args.model, args.max_turns, args.timeout,
-                    )
-                except subprocess.TimeoutExpired:
-                    raw, err = "", "TIMEOUT"
-                (workdir / "transcript.jsonl").write_text(raw, encoding="utf-8")
-                (workdir / "stderr.log").write_text(err or "", encoding="utf-8")
-                parsed = parse_stream(raw)
-                last_signals = extract_signals(raw, parsed)
-                # Ground-truth diff + correctness from the workspace.
-                last_signals.update(parse_numstat(diff_numstat(ws), seed_files))
-                try:
-                    last_signals["correct"] = run_grade(
-                        case.get("grade_abs"), ws, args.timeout)
-                except subprocess.TimeoutExpired:
-                    last_signals["correct"] = None
-                last_summary = parsed["assistant_text"] or parsed["result"]
-                (workdir / "signals.json").write_text(
-                    json.dumps(last_signals, indent=2), encoding="utf-8")
+    for model in models:
+        for case in cases:
+            by_arm = {}
+            for arm in arms:
+                # For repeat>1 we keep the last run's signals; default repeat=1
+                # keeps it simple and honest.
+                settings = build_settings(args.repo_root, args.lang, arm)
+                last_signals = None
+                last_summary = None
+                for rep in range(args.repeat):
+                    workdir = (out_root / model_dir(model) / case["id"]
+                               / arm / f"rep{rep}")
+                    workdir.mkdir(parents=True, exist_ok=True)
+                    ws = workdir / "ws"
+                    seed_files = prepare_workspace(ws, case.get("seed_abs"))
+                    print(f"[run] {model_dir(model)} {case['id']} {arm} "
+                          f"rep{rep} ...", file=sys.stderr)
+                    try:
+                        raw, err = run_arm(
+                            case["prompt"], settings,
+                            workdir / "settings.json", ws,
+                            model, args.max_turns, args.timeout,
+                        )
+                    except subprocess.TimeoutExpired:
+                        raw, err = "", "TIMEOUT"
+                    (workdir / "transcript.jsonl").write_text(
+                        raw, encoding="utf-8")
+                    (workdir / "stderr.log").write_text(
+                        err or "", encoding="utf-8")
+                    parsed = parse_stream(raw)
+                    last_signals = extract_signals(raw, parsed)
+                    # Ground-truth diff + correctness from the workspace.
+                    last_signals.update(
+                        parse_numstat(diff_numstat(ws), seed_files))
+                    try:
+                        last_signals["correct"] = run_grade(
+                            case.get("grade_abs"), ws, args.timeout)
+                    except subprocess.TimeoutExpired:
+                        last_signals["correct"] = None
+                    last_summary = parsed["assistant_text"] or parsed["result"]
+                    (workdir / "signals.json").write_text(
+                        json.dumps(last_signals, indent=2), encoding="utf-8")
 
-            judge = None
-            if args.judge and last_summary:
-                try:
-                    judge = run_judge(
-                        last_summary, args.judge_model or args.model,
-                        args.timeout)
-                except subprocess.TimeoutExpired:
-                    judge = None
-            by_arm[arm] = {"signals": last_signals, "judge": judge}
+                judge = None
+                if args.judge and last_summary:
+                    try:
+                        judge = run_judge(
+                            last_summary, args.judge_model or model,
+                            args.timeout)
+                    except subprocess.TimeoutExpired:
+                        judge = None
+                by_arm[arm] = {"signals": last_signals, "judge": judge}
 
-        results.append((case["id"], case["prompt"], by_arm))
+            results.append((model_dir(model), case["id"], case["prompt"], by_arm))
 
-    meta = {
-        "generated": stamp,
-        "model": args.model or "(default)",
-        "lang": args.lang,
-        "judge": args.judge,
-    }
-    report = render_report(results, meta)
-    report_path = out_root / "report.md"
-    report_path.write_text(report, encoding="utf-8")
-    print(f"\nReport: {report_path}")
-    print(report)
+        # Write/refresh the report after each model so partial results survive.
+        meta = {"generated": stamp, "lang": args.lang, "judge": args.judge}
+        report = render_report(results, meta)
+        (out_root / "report.md").write_text(report, encoding="utf-8")
+
+    print(f"\nReport: {out_root / 'report.md'}")
+    print(render_report(results, {"generated": stamp, "lang": args.lang,
+                                  "judge": args.judge}))
     return 0
 
 

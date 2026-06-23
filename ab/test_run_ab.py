@@ -234,22 +234,31 @@ class TestReport(unittest.TestCase):
             "control": {"signals": run_ab.extract_signals(CONTROL_TRANSCRIPT),
                         "judge": None},
         }
-        return [("csv_to_json", "Build a CSV tool.", by_arm)]
+        return [("sonnet", "csv_to_json", "Build a CSV tool.", by_arm)]
 
     def test_render_case_has_both_arms(self):
-        out = run_ab.render_case(*self._results()[0])
+        _model, cid, prompt, by_arm = self._results()[0]
+        out = run_ab.render_case(cid, prompt, by_arm)
         self.assertIn("csv_to_json", out)
         self.assertIn("hooks", out)
         self.assertIn("control", out)
         self.assertIn("ran tests", out)
 
-    def test_render_report_aggregate(self):
-        meta = {"generated": "now", "model": "sonnet", "lang": "en",
-                "judge": False}
+    def test_render_report_matrix(self):
+        meta = {"generated": "now", "lang": "en", "judge": False}
         out = run_ab.render_report(self._results(), meta)
         self.assertIn("# A/B report", out)
-        self.assertIn("Aggregate", out)
-        self.assertIn("hook fired rate", out)
+        self.assertIn("Matrix", out)
+        self.assertIn("hook%", out)
+        self.assertIn("| sonnet | hooks |", out)
+
+    def test_render_report_multi_model_matrix(self):
+        base = self._results()[0][3]
+        results = [("haiku", "c1", "p", base), ("sonnet", "c1", "p", base)]
+        out = run_ab.render_report(results, {"generated": "n", "lang": "en"})
+        self.assertIn("| haiku | hooks |", out)
+        self.assertIn("| sonnet | control |", out)
+        self.assertIn("## Detail: haiku", out)
 
     def _bench_results(self):
         # hooks: minimal correct edit (1 existing file, small churn) + a test file
@@ -262,30 +271,32 @@ class TestReport(unittest.TestCase):
         c.update({"existing_files": 2, "existing_add": 18, "existing_del": 9,
                   "new_files": 0, "new_add": 0, "new_del": 0,
                   "total_files": 2, "correct": True})
-        return [("bugfix", "Fix the bug.",
+        return [("sonnet", "bugfix", "Fix the bug.",
                  {"hooks": {"signals": h, "judge": None},
                   "control": {"signals": c, "judge": None}})]
 
     def test_bench_rows_render(self):
-        out = run_ab.render_case(*self._bench_results()[0])
+        _model, cid, prompt, by_arm = self._bench_results()[0]
+        out = run_ab.render_case(cid, prompt, by_arm)
         self.assertIn("correct (held-out test)", out)
         self.assertIn("existing files touched", out)
         self.assertIn("existing-file churn", out)
         self.assertIn("new files", out)
 
-    def test_bench_aggregate_has_correct_rate(self):
-        meta = {"generated": "n", "model": "m", "lang": "en", "judge": False}
+    def test_bench_matrix_has_bench_columns(self):
+        meta = {"generated": "n", "lang": "en", "judge": False}
         out = run_ab.render_report(self._bench_results(), meta)
-        self.assertIn("correct rate", out)
-        self.assertIn("avg existing files touched", out)
+        self.assertIn("correct%", out)
+        self.assertIn("exist files", out)
+        self.assertIn("exist churn", out)
 
     def test_render_with_judge(self):
-        results = self._results()
-        results[0][2]["hooks"]["judge"] = {
+        _model, cid, prompt, by_arm = self._results()[0]
+        by_arm["hooks"]["judge"] = {
             "stated_assumptions": 2, "tests_first": 2,
             "inventoried_existing": 1, "scope_discipline": 2,
             "avoided_overengineering": 2, "note": "x"}
-        out = run_ab.render_case(*results[0])
+        out = run_ab.render_case(cid, prompt, by_arm)
         self.assertIn("judge dimension", out)
         self.assertIn("stated_assumptions", out)
 
