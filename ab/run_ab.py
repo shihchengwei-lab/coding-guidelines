@@ -707,13 +707,12 @@ def main(argv=None):
 
     for model in models:
         for case in cases:
-            by_arm = {}
+            # Collect per-rep signals for each arm, then emit one result row per
+            # rep so the matrix aggregation averages across repetitions (taming
+            # single-run noise) instead of keeping only the last.
+            per_arm_reps = {arm: [] for arm in arms}
             for arm in arms:
-                # For repeat>1 we keep the last run's signals; default repeat=1
-                # keeps it simple and honest.
                 settings = build_settings(args.repo_root, args.lang, arm)
-                last_signals = None
-                last_summary = None
                 for rep in range(args.repeat):
                     workdir = (out_root / model_dir(model) / case["id"]
                                / arm / f"rep{rep}")
@@ -735,32 +734,36 @@ def main(argv=None):
                     (workdir / "stderr.log").write_text(
                         err or "", encoding="utf-8")
                     parsed = parse_stream(raw)
-                    last_signals = extract_signals(raw, parsed)
+                    signals = extract_signals(raw, parsed)
                     # Ground-truth diff + correctness from the workspace.
-                    last_signals.update(
-                        parse_numstat(diff_numstat(ws), seed_files))
+                    signals.update(parse_numstat(diff_numstat(ws), seed_files))
                     try:
                         grade = run_grade(
                             case.get("grade_abs"), ws, args.timeout)
                     except subprocess.TimeoutExpired:
                         grade = None
                     if grade:
-                        last_signals.update(grade)
-                    last_summary = parsed["assistant_text"] or parsed["result"]
+                        signals.update(grade)
                     (workdir / "signals.json").write_text(
-                        json.dumps(last_signals, indent=2), encoding="utf-8")
+                        json.dumps(signals, indent=2), encoding="utf-8")
 
-                judge = None
-                if args.judge and last_summary:
-                    try:
-                        judge = run_judge(
-                            last_summary, args.judge_model or model,
-                            args.timeout)
-                    except subprocess.TimeoutExpired:
-                        judge = None
-                by_arm[arm] = {"signals": last_signals, "judge": judge}
+                    judge = None
+                    if args.judge:
+                        summary = parsed["assistant_text"] or parsed["result"]
+                        if summary:
+                            try:
+                                judge = run_judge(
+                                    summary, args.judge_model or model,
+                                    args.timeout)
+                            except subprocess.TimeoutExpired:
+                                judge = None
+                    per_arm_reps[arm].append(
+                        {"signals": signals, "judge": judge})
 
-            results.append((model_dir(model), case["id"], case["prompt"], by_arm))
+            for rep in range(args.repeat):
+                by_arm = {arm: per_arm_reps[arm][rep] for arm in arms}
+                rid = case["id"] if args.repeat == 1 else f"{case['id']}#r{rep}"
+                results.append((model_dir(model), rid, case["prompt"], by_arm))
 
         # Write/refresh the report after each model so partial results survive.
         meta = {"generated": stamp, "lang": args.lang, "judge": args.judge}

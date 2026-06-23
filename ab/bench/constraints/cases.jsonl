@@ -1,0 +1,5 @@
+# High-constraint benchmark: one spec, many independent fiddly rules, scored
+# fractionally. Designed to land in the regime where weaker models drop some
+# rules (score < 100%) so the hook's verify-before-done behavior has room to
+# show value — or to show it doesn't.
+{"id": "miniconfig", "seed": "miniconfig/seed", "grade": "miniconfig/grade_test.py", "prompt": "Implement parse_config(text) in config.py exactly as specified in its docstring. The format has many rules (comments, quoting, escapes, lists, dotted nested keys, typed scalars with strict int/float matching) — follow every one."}
