@@ -179,6 +179,30 @@ class TestNumstat(unittest.TestCase):
         self.assertEqual(r["total_files"], 0)
 
 
+class TestCopySeed(unittest.TestCase):
+    def test_excludes_pycache_and_pyc(self):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as tmp:
+            seed = Path(tmp) / "seed"
+            (seed / "__pycache__").mkdir(parents=True)
+            (seed / "mod.py").write_text("x = 1")
+            (seed / "__pycache__" / "mod.pyc").write_text("junk")
+            (seed / "stray.pyc").write_text("junk")
+            ws = Path(tmp) / "ws"
+            files = run_ab.copy_seed(str(seed), ws)
+            self.assertEqual(files, ["mod.py"])
+            self.assertTrue((ws / "mod.py").exists())
+            self.assertFalse((ws / "__pycache__").exists())
+            self.assertFalse((ws / "stray.pyc").exists())
+
+    def test_no_seed_returns_empty(self):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(run_ab.copy_seed(None, Path(tmp) / "ws"), [])
+
+
 class TestJudge(unittest.TestCase):
     def test_build_prompt_contains_transcript(self):
         p = run_ab.build_judge_prompt("THE TRANSCRIPT")
