@@ -13,11 +13,19 @@ as direction, not decimals.
 - **The hook works as designed**: it reliably changes behavior, pushing
   test-writing from 0% (control) to 67–100% (hooks).
 - **Its cost is modest on real-sized tasks** (+8% haiku, +15% sonnet, +64% opus
-  on the 27-rule parser), not the ~2× seen only on trivial tasks.
+  on the 27-rule parser), but large on tiny tasks (~2.5–3×) — the overhead is
+  relative to task size.
+- **The Stop hook's anti-over-engineering effect is real but weak.** On
+  open-ended "make it production-ready" prompts the arms finally diverge: the
+  hook trims implementation bloat by ~10% on average (clear win on "robustify"
+  framing, a consistent *reversal* on "make it flexible" framing). But it also
+  adds tests, so total output is *larger* with the hook, not smaller.
 - **Verdict**: on clean, solvable, well-specified tasks the hook is insurance
-  with no payoff — the models don't make the mistakes it would catch. Whether
-  it's worth it depends entirely on the messy/ambiguous/large-real-codebase
-  regime, which a synthetic benchmark **cannot fairly measure**.
+  with no payoff — the models don't make the mistakes it would catch. On
+  open-ended tasks it nudges toward less bloat but inconsistently, and never
+  makes the *total* diff smaller. Whether it's worth it depends on the
+  messy/ambiguous/large-real-codebase regime, which a synthetic benchmark
+  **cannot fairly measure**.
 
 ## What we tried (and why each round failed to discriminate)
 
@@ -54,6 +62,35 @@ opus < sonnet < haiku — but n=1, treat as suggestive only.)
 
 Same correctness in both arms; the hook's measurable effect is purely
 behavioral (test-writing) and a modest cost increase.
+
+## Over-engineering probe (the Stop hook's other job)
+
+The Stop hook also reviews for over-engineering / scope creep. To test that, we
+used tiny working seeds with deliberately open-ended prompts ("make it more
+robust / flexible / production-ready") and no grader — the outcome is the diff
+itself. Existing-file churn is the bloat signal; test/new-file churn is reported
+separately. Repeat 3 (noisy).
+
+Implementation churn (existing-file lines changed), averaged across 4 tasks:
+
+| model | hooks | control | total churn incl. tests (hooks / control) |
+|---|---|---|---|
+| haiku | 67 | 78 | 159 / 134 |
+| sonnet | 23 | 25 | 94 / 25 |
+| opus | 30 | 34 | 91 / 34 |
+
+- The hook trims implementation bloat ~10% on average — the first arm-difference
+  in *output* seen anywhere in this project.
+- It is task-dependent: a clear win on `tempconv` (control gold-plates to 127
+  lines; hooks stays ~37), but a consistent *reversal* on `settings_get` (the
+  "be flexible" framing makes the hook arm build *more*). Slugify / retry ≈ even.
+- Total output is always *larger* with the hook, because it adds test files.
+- Confound: on open-ended prompts the control arm sometimes barely engages
+  (one settings_get rep changed 0 lines), which looks disciplined but is just
+  non-engagement.
+
+So the Stop hook does restrain over-engineering — weakly, inconsistently, and
+without shrinking the overall diff.
 
 ## Honest limits
 
