@@ -1,0 +1,9 @@
+# A/B prompt cases. One JSON object per line: {"id": ..., "prompt": ...}
+# Lines starting with # are ignored. These are deliberately the kinds of tasks
+# the hooks are meant to influence: non-trivial builds where stating
+# assumptions / writing tests / inventorying existing code should show up.
+{"id": "csv_to_json", "prompt": "Build a small tool that reads a CSV, filters columns, and outputs JSON."}
+{"id": "rate_limiter", "prompt": "Implement a rate limiter for an API endpoint."}
+{"id": "retry_helper", "prompt": "Create a helper that retries a flaky network call with backoff."}
+{"id": "config_loader", "prompt": "Build a config loader that reads settings from a file and the environment."}
+{"id": "dedup_lines", "prompt": "Write a script that removes duplicate lines from a large file."}

@@ -187,7 +187,7 @@ A few trade-offs:
 - **Specificity**: abstract rules ("don't write unnecessary code") apply broadly but leave interpretive room; specific rules ("don't add unrequested features, don't write abstractions for one-shot code") leave less room but only cover the shapes you list
 - **Channel contrast**: CLAUDE.md is read once at session start, with distance decay in long sessions; hooks inject every turn with high weight and no decay, but pay token cost every turn
 
-There's no single right version. The sweet spot depends on your session length distribution, token cost tolerance, workflow sensitivity to compliance, and review window. Run a few experiments yourself.
+There's no single right version. The sweet spot depends on your session length distribution, token cost tolerance, workflow sensitivity to compliance, and review window. Run a few experiments yourself — [`ab/`](./ab/) is an A/B harness that runs the same prompts with hooks on vs. off and produces a comparison report.
 
 ---
 
