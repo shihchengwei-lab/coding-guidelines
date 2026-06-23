@@ -1,0 +1,8 @@
+# Multi-file bug-hunt benchmark. Each seed is a small WORKING-BUT-BUGGY system;
+# the prompt is a symptom report, and the agent must read the code, locate the
+# root cause, and fix it. Graders mix regression checks (pass on the seed) with
+# bug checks (pass only after a correct fix), so the seed scores partial and the
+# score measures bug-finding ability with a gradient.
+{"id": "reactive_cells", "seed": "reactive_cells/seed", "grade": "reactive_cells/grade_test.py", "prompt": "Bug report: in this reactive spreadsheet (sheet.py, formulas.py), after I change a cell's value with set_value, direct dependents update but multi-step chains and diamond dependencies show stale values. Find the root cause and fix it so every dependent stays up to date."}
+{"id": "ledger_holds", "seed": "ledger_holds/seed", "grade": "ledger_holds/grade_test.py", "prompt": "Bug report: in this ledger (accounts.py, ledger.py), funds that are reserved by a hold can still be withdrawn or transferred. A hold is supposed to make that money unavailable. Find the root cause and fix it."}
+{"id": "csv_aggregate", "seed": "csv_aggregate/seed", "grade": "csv_aggregate/grade_test.py", "prompt": "Bug report: in this aggregation code (parse.py, aggregate.py), the averages() output is wrong — averages that should be fractional (e.g. 1.5) come out as whole numbers. Totals look correct. Find and fix the bug."}
